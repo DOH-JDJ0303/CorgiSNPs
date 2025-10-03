@@ -12,16 +12,14 @@ CorgiSNPs is a fungal core-genome SNP pipeline that can:
 🧬 Provide sample- and cluster-level summaries suitable for downstream visualization \
 🧬 Export results in standard formats (VCF, FASTA, Newick, CSV, Microreact)
 
-CorgiSNPs is designed for public health fungal genomics (currently only tested with *Candidozyma auris* (*Candida auris*)). \
-It builds on the foundation of MycoSNP but improves workflow automation, handling of higher ploidy organisms, \
-and phylogenetic interpretation.
+CorgiSNPs is designed for public health fungal genomics (currently only tested with *Candidozyma auris* (*Candida auris*)). It builds on the foundation of MycoSNP but improves workflow automation, handling of higher ploidy organisms, and phylogenetic interpretation.
 
 ## Pipeline Overview
-- **Prepare** – QC and assembly/consensus generation 
-- **Classify** – Taxonomic ID and subtyping 
-- **Variants** – Variant calling across samples 
-- **AMR** – Detection of antifungal resistance markers 
-- **Phylo** – Core SNP phylogenetics and distance metrics 
+- **Prepare** – Prepare inputs (read QC, etc.,)
+- **Classify** – De novo assembly, speciation, and subtyping
+- **Variants** – Reference-based variant calling
+- **AMR** – Detection of antifungal resistance markers
+- **Phylo** – Core SNP phylogenetics and distance metrics
 - **Report** – Interactive and static summaries
 
 ## More Information
