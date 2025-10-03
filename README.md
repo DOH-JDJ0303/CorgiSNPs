@@ -2,7 +2,7 @@
 <img src="docs/images/CorgiSNPs_logo.png" width="600px" >
 </p>
 
-# CorgiSNPs: Core Genome Investigation SNPs
+# CorgiSNPs: Core Genome Investigation of SNPs
 ## Key Features
 CorgiSNPs is a fungal core-genome SNP pipeline that can:
 
