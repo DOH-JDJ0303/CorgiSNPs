@@ -1,5 +1,5 @@
 //
-// Subworkflow with functionality specific to the DOH-JDJ0303/corgisnps pipeline
+// Subworkflow with functionality specific to the DOH-JDJ0303/CorgiSNPs pipeline
 //
 
 /*
@@ -70,21 +70,21 @@ workflow PIPELINE_INITIALISATION {
     Channel
         .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
         .map {
-            meta, fastq_1, fastq_2 ->
+            meta, fastq_1, fastq_2, species, subtype, reference, sra ->
                 if (!fastq_2) {
-                    return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
+                    return [ meta + [ single_end:true ], [ fastq_1 ], species, subtype, reference, sra ]
                 } else {
-                    return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
+                    return [ meta + [ single_end:false ], [ fastq_1, fastq_2 ], species, subtype, reference, sra ]
                 }
         }
-        .groupTuple()
-        .map { samplesheet ->
-            validateInputSamplesheet(samplesheet)
-        }
-        .map {
-            meta, fastqs ->
-                return [ meta, fastqs.flatten() ]
-        }
+        // .groupTuple()
+        // .map { samplesheet ->
+        //     validateInputSamplesheet(samplesheet)
+        // }
+        // .map {
+        //     meta, fastqs, species, subtype, reference ->
+        //         return [ meta, fastqs.flatten(), species.flatten(), subtype.flatten(), reference.flatten() ]
+        // }
         .set { ch_samplesheet }
 
     emit:

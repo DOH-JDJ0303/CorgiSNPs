@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+
+# lowsites
+# Author: Jared Johnson, jared.johnson@doh.wa.gov
+
+import argparse
+import gzip
+import sys
+import logging
+import os
+import csv
+
+def setup_logging(log_level='INFO', log_file=None):
+    """Setup basic logging"""
+    level = getattr(logging, log_level.upper())
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+    
+    logger = logging.getLogger()
+    logger.setLevel(level)
+    logger.handlers.clear()
+    logger.addHandler(console_handler)
+    
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
+    return logger
+
+def open_file(filename):
+    """Open file, handling gzip and stdin"""
+    if filename == "-":
+        logging.debug("Reading from stdin")
+        return sys.stdin
+    if filename.endswith(".gz"):
+        logging.debug(f"Opening gzipped file: {filename}")
+        return gzip.open(filename, "rt")
+    logging.debug(f"Opening regular file: {filename}")
+    return open(filename, "r")
+
+def parse_mpileup_line(line):
+    """Parse a single mpileup line, return (chrom, pos, depth, avg_quality)"""
+    fields = line.strip().split("\t")
+    if len(fields) < 6:
+        logging.debug(f"Skipping line with insufficient fields: {len(fields)}")
+        return None
+    
+    chrom, pos_str, ref, depth_str, bases, quals = fields[:6]
+    
+    try:
+        pos = int(pos_str)
+        depth = int(depth_str)
+    except ValueError:
+        logging.debug(f"Skipping line with invalid pos/depth: {pos_str}, {depth_str}")
+        return None
+    
+    # Calculate average base quality (PHRED + 33)
+    avg_qual = None
+    if quals and depth > 0:
+        qualities = [ord(c) - 33 for c in quals]
+        if len(qualities) > 0:
+            avg_qual = sum(qualities) / len(qualities)
+    
+    return chrom, pos, depth, avg_qual
+
+def site_check(depth, avg_qual, min_depth, qual_threshold):
+    """Check if site should be masked and return reason"""
+    reasons = []
+    
+    if min_depth is not None and depth < min_depth:
+        reasons.append("low_depth")
+    if avg_qual is not None and avg_qual < qual_threshold:
+        reasons.append("low_quality")
+    
+    if reasons:
+        return True, ";".join(reasons)
+    return False, None
+
+def find_mask_sites(mpileup_file, min_depth, qual_threshold):
+    """Find all sites that should be masked with reasons"""
+    mask_sites = []
+    lines_processed = 0
+    sites_masked = 0
+
+    # NEW: running totals for summary stats
+    depth_sum = 0
+    qual_sum = 0.0
+    qual_count = 0  # only count sites where qualities are present
+    
+    logging.info(f"Processing mpileup file: {mpileup_file}")
+    logging.info(f"Masking criteria: depth < {min_depth} OR avg_quality < {qual_threshold}")
+    
+    with open_file(mpileup_file) as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            
+            result = parse_mpileup_line(line)
+            if result is None:
+                continue
+
+            lines_processed += 1
+            if lines_processed % 1_000_000 == 0:
+                logging.info(f"Processed {lines_processed:,} lines, found {sites_masked:,} sites to mask")
+            
+            chrom, pos, depth, avg_qual = result
+
+            # NEW: accumulate global stats
+            depth_sum += depth
+            if avg_qual is not None:
+                qual_sum += avg_qual
+                qual_count += 1
+            
+            should_mask, reason = site_check(depth, avg_qual, min_depth, qual_threshold)
+            if should_mask:
+                # Convert to 0-based BED coordinates and include metadata
+                mask_sites.append((chrom, pos - 1, pos, reason, depth, avg_qual))
+                sites_masked += 1
+    
+    # NEW: compute and log global averages
+    if lines_processed > 0:
+        avg_depth_all = depth_sum / lines_processed
+    else:
+        avg_depth_all = 0.0
+
+    avg_qual_all = (qual_sum / qual_count) if qual_count > 0 else None
+
+    logging.info(f"Finished processing: {lines_processed:,} lines processed")
+    if lines_processed > 0:
+        pct_masked = (sites_masked / lines_processed) * 100.0
+        logging.info(f"Found {sites_masked:,} sites to mask ({pct_masked:.2f}%)")
+    else:
+        logging.info("Found 0 sites to mask (no lines processed)")
+
+    # summary line(s)
+    if avg_qual_all is None:
+        logging.info(f"Genome-wide averages across all sites: avg_depth={avg_depth_all:.2f}, avg_quality=NA (no qualities present)")
+    else:
+        logging.info(f"Genome-wide averages across all sites: avg_depth={avg_depth_all:.2f}, avg_quality={avg_qual_all:.2f}")
+
+    with open("lowsites.csv", "w", newline="") as f:
+        out = {'average_depth':avg_depth_all, 'average_quality':avg_qual_all}
+        writer = csv.DictWriter(f, fieldnames=list(out.keys()))
+        writer.writeheader()
+        writer.writerow(out)
+
+    # Optional: also log how many sites contributed to quality average
+    logging.debug(f"Quality present at {qual_count:,} of {lines_processed:,} sites")
+
+    return mask_sites
+
+def merge_intervals(intervals):
+    """Merge overlapping/adjacent intervals, combining metadata"""
+    if not intervals:
+        logging.info("No intervals to merge")
+        return []
+    
+    logging.info(f"Merging {len(intervals):,} intervals")
+    
+    # Sort by chromosome then position
+    intervals.sort()
+    merged = [intervals[0]]
+    
+    for chrom, start, end, reason, depth, avg_qual in intervals[1:]:
+        last_chrom, last_start, last_end, last_reason, last_depth, last_avg_qual = merged[-1]
+        
+        if chrom == last_chrom and start <= last_end:
+            # Merge with previous interval
+            combined_reasons = set(last_reason.split(";") + reason.split(";"))
+            combined_reason = ";".join(sorted(combined_reasons))
+            
+            combined_depth = (last_depth + depth) / 2
+            combined_avg_qual = None
+            if last_avg_qual is not None and avg_qual is not None:
+                combined_avg_qual = (last_avg_qual + avg_qual) / 2
+            elif last_avg_qual is not None:
+                combined_avg_qual = last_avg_qual
+            elif avg_qual is not None:
+                combined_avg_qual = avg_qual
+            
+            merged[-1] = (last_chrom, last_start, max(last_end, end), 
+                         combined_reason, combined_depth, combined_avg_qual)
+        else:
+            merged.append((chrom, start, end, reason, depth, avg_qual))
+    
+    logging.info(f"Merged to {len(merged):,} intervals")
+    return merged
+
+def write_bed_file(intervals, output_file, merge=True, include_header=False):
+    """Write intervals to BED format with metadata"""
+    if merge:
+        intervals = merge_intervals(intervals)
+    
+    logging.info(f"Writing {len(intervals):,} intervals to BED format")
+    
+    if output_file == "-":
+        logging.debug("Writing to stdout")
+        output = sys.stdout
+    else:
+        logging.info(f"Writing to file: {output_file}")
+        output = open(output_file, "w")
+    
+    try:
+        # Write header if requested
+        if include_header:
+            output.write("#chrom\tstart\tend\treason\tavg_depth\tavg_quality\n")
+        
+        for chrom, start, end, reason, depth, avg_qual in intervals:
+            # Format quality to 2 decimal places, handle None case
+            qual_str = f"{avg_qual:.2f}" if avg_qual is not None else "NA"
+            depth_str = f"{depth:.1f}"
+            
+            output.write(f"{chrom}\t{start}\t{end}\t{reason}\t{depth_str}\t{qual_str}\n")
+        
+        logging.info("BED file written successfully")
+    finally:
+        if output != sys.stdout:
+            output.close()
+
+def main():
+    version = "1.2"  # bumped version
+
+    parser = argparse.ArgumentParser(
+        description=f"""
+        lowsites v{version}
+        
+        Create a BED file of regions to mask based on per-site average base quality and/or depth
+        from a single-sample samtools mpileup text file.
+        
+        Masking rule: mask site if (depth < MIN_DEPTH) OR (avg_base_quality < QUAL_THRESHOLD)
+        
+        Output format: chrom start end reason avg_depth avg_quality
+        Where reason can be: low_depth, low_quality, or low_depth;low_quality
+        
+        Examples:
+        samtools mpileup -aa aln.bam > sample.pileup
+        python lowsites.py sample.pileup -t 20 -d 10 > mask.bed
+        """
+    )
+    parser.add_argument("mpileup", help="Path to samtools mpileup file (single-sample). Use '-' for stdin.")
+    parser.add_argument("-t", "--qual-threshold", type=float, default=20.0, help="Average base quality threshold (mask if avgBQ < T)")
+    parser.add_argument("-d", "--min-depth", type=int, default=10, help="Minimum depth threshold (mask if depth < D)")
+    parser.add_argument("-o", "--output", default="-", help="Output BED file (default: stdout).")
+    parser.add_argument("--no-merge", action="store_true", help="Do not merge adjacent/overlapping masked sites")
+    parser.add_argument("--header", action="store_true", help="Include header line in output")
+    parser.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
+                       default='INFO', help="Logging level")
+    parser.add_argument("--log-file", help="Log file path (optional)")
+    parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
+    
+    args = parser.parse_args()
+    
+    # Setup logging
+    logger = setup_logging(args.log_level, args.log_file)
+    
+    logging.info(f"{os.path.basename(__file__).replace('.py', '')} v{version}")
+    logging.info(f"Author: Jared Johnson")
+    logging.info("Starting low quality site detection")
+    
+    # Log parameters
+    logging.info(f"Input file: {args.mpileup}")
+    logging.info(f"Quality threshold: {args.qual_threshold}")
+    logging.info(f"Minimum depth: {args.min_depth}")
+    logging.info(f"Output file: {args.output}")
+    logging.info(f"Merge intervals: {not args.no_merge}")
+    logging.info(f"Include header: {args.header}")
+    
+    try:
+        # Find sites to mask
+        mask_sites = find_mask_sites(args.mpileup, args.min_depth, args.qual_threshold)
+        
+        # Write BED output
+        write_bed_file(mask_sites, args.output, merge=not args.no_merge, include_header=args.header)
+        
+        logging.info("Analysis completed successfully!")
+        
+    except Exception as e:
+        logging.error(f"Analysis failed: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

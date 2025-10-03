@@ -1,7 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/DOH-JDJ0303/corgisnps/master/assets/schema_input.json",
-    "title": "DOH-JDJ0303/corgisnps pipeline - params.input schema",
+    "$id": "https://raw.githubusercontent.com/DOH-JDJ0303/CorgiSNPs/master/assets/schema_input.json",
+    "title": "DOH-JDJ0303/CorgiSNPs pipeline - params.input schema",
     "description": "Schema for the file provided with params.input",
     "type": "array",
     "items": {
@@ -18,7 +18,7 @@
                 "format": "file-path",
                 "exists": true,
                 "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+                "errorMessage": "FastQ file for reads 1 must be provided (or SRA accession), cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
             },
             "fastq_2": {
                 "type": "string",
@@ -26,8 +26,30 @@
                 "exists": true,
                 "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
                 "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+            },
+            "species": {
+                "type": "string",
+                "default": null            
+            },
+            "subtype": {
+                "type": "string",
+                "default": null
+            },
+            "reference": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "default": null,
+                "pattern": "^([\\S\\s]*/)?[^\\s/]+\\.(fa(sta)?|fna)\\.gz$",
+                "errorMessage": "Fasta file used as reference genome"
+            },
+            "sra": {
+                "type": "string",
+                "default": null,
+                "pattern": "^(SRR|ERR|DRR)\\d{6,}$",
+                "errorMessage": "Sequence Read Archive (SRA) accession"
             }
         },
-        "required": ["sample", "fastq_1"]
+        "required": ["sample"]
     }
 }

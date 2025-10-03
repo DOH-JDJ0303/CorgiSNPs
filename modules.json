@@ -1,16 +1,31 @@
 {
-    "name": "DOH-JDJ0303/corgisnps",
-    "homePage": "https://github.com/DOH-JDJ0303/corgisnps",
+    "name": "DOH-JDJ0303/CorgiSNPs",
+    "homePage": "https://github.com/DOH-JDJ0303/CorgiSNPs",
     "repos": {
         "https://github.com/nf-core/modules.git": {
             "modules": {
                 "nf-core": {
+                    "fastp": {
+                        "branch": "master",
+                        "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
+                        "installed_by": ["modules"]
+                    },
                     "fastqc": {
                         "branch": "master",
                         "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
                         "installed_by": ["modules"]
                     },
                     "multiqc": {
+                        "branch": "master",
+                        "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
+                        "installed_by": ["modules"]
+                    },
+                    "samtools/mpileup": {
+                        "branch": "master",
+                        "git_sha": "0fcfdcd387f2ef4a880f3ec87162fa64d374cae3",
+                        "installed_by": ["modules"]
+                    },
+                    "shovill": {
                         "branch": "master",
                         "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
                         "installed_by": ["modules"]

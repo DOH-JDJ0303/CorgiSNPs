@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+
+# coordcutter
+# Author: Jared Johnson, jared.johnson@doh.wa.gov
+
+import argparse
+import logging
+import os
+import sys
+import time
+import subprocess
+from typing import Dict, List, Tuple
+from Bio import SeqIO
+from Bio.Seq import Seq
+
+
+# ---------------------------
+# Logging
+# ---------------------------
+LOG = logging.getLogger("gene_extractor_min")
+
+def setup_logging(level: str = "INFO", logfile: str | None = None) -> None:
+    lv = getattr(logging, level.upper(), logging.INFO)
+    fmt = "%(asctime)s [%(levelname)s] %(message)s"
+    handlers: List[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if logfile:
+        os.makedirs(os.path.dirname(logfile), exist_ok=True)
+        handlers.append(logging.FileHandler(logfile, mode="a", encoding="utf-8"))
+    logging.basicConfig(level=lv, format=fmt, handlers=handlers)
+
+
+# ---------------------------
+# Small helpers
+# ---------------------------
+def run(cmd: List[str], **popen_kwargs) -> None:
+    """Run a command and raise if it fails."""
+    LOG.debug("RUN: %s", " ".join(cmd))
+    t0 = time.perf_counter()
+    try:
+        subprocess.run(cmd, check=True, **popen_kwargs)
+    except subprocess.CalledProcessError as e:
+        LOG.error("Command failed (%0.2fs): %s", time.perf_counter() - t0, " ".join(cmd))
+        raise e
+    LOG.debug("OK (%0.2fs): %s", time.perf_counter() - t0, " ".join(cmd))
+
+def check_tools(tools: List[str]) -> None:
+    import shutil
+    missing = [t for t in tools if shutil.which(t) is None]
+    if missing:
+        for t in missing:
+            LOG.error("Required tool not found in PATH: %s", t)
+        sys.exit(1)
+    LOG.info("Tools available: %s", ", ".join(tools))
+
+def file_size(path: str) -> str:
+    try:
+        n = os.path.getsize(path)
+    except OSError:
+        return path
+    for u in ["B","KB","MB","GB","TB","PB"]:
+        if n < 1024 or u == "PB":
+            return f"{path} ({n:.1f}{u})" if u=="B" else f"{path} ({n:.1f}{u})"
+        n /= 1024
+    return path
+
+
+# ---------------------------
+# Core logic
+# ---------------------------
+def parse_gff_gene_spans(gff: str, targets: List[str], flank: int) -> Dict[str, Dict]:
+    """
+    Return {gene: {contig,start,end,strand,length}} using min(start), max(end)
+    over features with types in {gene,mRNA,CDS,exon} matching the target genes.
+    """
+    targets_set = set(targets)
+    spans: Dict[str, Dict] = {}  # gene -> {contig,strand,starts,ends}
+    with open(gff, "r") as fh:
+        for ln in fh:
+            if not ln or ln.startswith("#"):
+                continue
+            parts = ln.rstrip("\n").split("\t")
+            if len(parts) < 9:
+                continue
+            contig, _, ftype, s, e, _, strand, _, attrs = parts
+            ftype = ftype.upper()
+            if ftype != "GENE":
+                continue
+
+            # crude attribute parsing for gene=, ID=, Parent=
+            gene_name = None
+            for kv in attrs.split(";"):
+                kv = kv.strip()
+                if kv.startswith("Name="):
+                    gene_name = kv.split("=",1)[1]
+                    break
+            if gene_name is None:
+                LOG.error(f"Gene names must be supplied via 'Name=' in the GFF. \n{ln}")
+
+            if gene_name and gene_name in targets_set:
+                start, end = int(s)-1, int(e)  # convert to 0-based, end exclusive
+                if gene_name not in spans:
+                    spans[gene_name] = {"contig": contig, "strand": strand, "start": [], "end": []}
+                spans[gene_name]["start"] = start - flank
+                spans[gene_name]["end"]   = end + flank
+    if not spans:
+        LOG.warning("No gene spans matched targets.")
+    return spans
+
+
+def load_genome_dict(fasta: str) -> Dict[str, Seq]:
+    """Load genome sequences into a dict keyed by both full id and first token."""
+    d: Dict[str, Seq] = {}
+    for rec in SeqIO.parse(fasta, "fasta"):
+        d[rec.id] = rec.seq
+    LOG.info("Loaded %d sequence keys from genome", len(d))
+    return d
+
+
+def write_gene_fasta(gene_seqs: Dict[str, str], outdir: str) -> str:
+    path = os.path.join(outdir, "target_gene_regions.fa")
+    with open(path, "w") as fh:
+        for g, s in gene_seqs.items():
+            fh.write(f">{g}\n{s}\n")
+    LOG.info("Wrote gene regions FASTA: %s", file_size(path))
+    return path
+
+
+def mask_genome(gdict: Dict[str, str], spans: Dict[str, Dict], outdir: str) -> str:
+    """
+    Keep only span +/- flank; everything else 'N'. Write masked FASTA.
+    """
+    masked_file = os.path.join(outdir, "genome_masked.fasta")
+
+    # index spans per contig (use both id and first token)
+    spans_by_contig: Dict[str, List[Tuple[int,int,str]]] = {}
+    for g, d in spans.items():
+        spans_by_contig.setdefault(d['contig'], []).append((d["start"], d["end"]))
+
+    total_preserved = 0
+    out_recs = []
+    for c, s in gdict.items():
+        L = len(s)
+        masked = bytearray(b"N" * L)
+        original = str(s).upper()
+        any_preserved = False
+
+        for s, e in spans_by_contig.get(c, []):
+            a = max(0, s)
+            b = min(L, e)
+            # copy original letters into keep
+            masked[a:b] = original[a:b].encode("ascii")
+            total_preserved += (b - a)
+            any_preserved = True
+
+        out_recs.append(f">{c}\n{masked.decode('ascii')}")
+        if not any_preserved:
+            LOG.warning(f"Contig {c}: fully masked")
+
+    with open(masked_file, "w") as fh:
+        fh.write('\n'.join(out_recs) + '\n')
+    LOG.info(f"Wrote masked genome: {file_size(masked_file)}; preserved ~{total_preserved} bp total")
+    return masked_file
+
+
+def align_regions_to_ref(gene_fa: str, ref_fa: str, outdir: str, threads: int) -> str:
+    """
+    minimap2 (asm5) -> PAF; convert to BED with +/- flank around target hit.
+    """
+    paf = os.path.join(outdir, "gene_alignments.paf")
+    bed = os.path.join(outdir, "gene_regions.bed")
+
+    with open(paf, "w") as out:
+        run(["minimap2", "-t", str(threads), "-x", "asm5", "--cs", ref_fa, gene_fa], stdout=out)
+    LOG.info("PAF: %s", file_size(paf))
+
+    regions: List[Tuple[str,int,int,str]] = []
+    with open(paf, "r") as fh:
+        for ln in fh:
+            if not ln.strip():
+                continue
+            f = ln.rstrip("\n").split("\t")
+            if len(f) < 12:
+                continue
+            qname = f[0]
+            tname = f[5]
+            tlen  = int(f[6])
+            ts, te = int(f[7]), int(f[8])
+            mapq = int(f[11])
+            if mapq < 10:
+                continue
+            regions.append((tname, ts, te, qname))
+
+    with open(bed, "w") as fh:
+        for chrom, ts, te, name in sorted(regions):
+            fh.write(f"{chrom}\t{ts}\t{te}\t{name}\n")
+    LOG.info(f"BED: {file_size(bed)} ({len(regions)} regions)")
+    if not regions:
+        LOG.warning("No high-quality alignments; BED is empty.")
+    return bed
+
+
+def extract_reads(bam: str, bed: str, outdir: str, threads: int) -> Tuple[str, str]:
+    """
+    Extract reads overlapping BED; pull full read pairs; write R1/R2 fastq.gz
+    """
+    r1 = os.path.join(outdir, "extracted_reads_R1.fastq.gz")
+    r2 = os.path.join(outdir, "extracted_reads_R2.fastq.gz")
+
+    # Quick empty BED check
+    if os.path.getsize(bed) == 0:
+        open(r1, "wb").close()
+        open(r2, "wb").close()
+        LOG.warning("BED is empty; wrote empty FASTQs.")
+        return r1, r2
+
+    region_bam = os.path.join(outdir, "region_reads.bam")
+    coord_bam  = os.path.join(outdir, "region_reads_sorted.bam")
+    names_bam  = os.path.join(outdir, "region_reads_name_sorted.bam")
+    qnames_txt = os.path.join(outdir, "read_names.txt")
+    full_bam   = os.path.join(outdir, "full_reads.bam")
+
+    # 1) reads overlapping regions
+    with open(region_bam, "wb") as out:
+        run(["samtools", "view", "-@", str(threads), "-b", "-h", "-L", bed, bam], stdout=out)
+
+    # 2) coordinate sort + index
+    run(["samtools", "sort", "-@", str(threads), "-o", coord_bam, region_bam])
+    run(["samtools", "index", "-@", str(threads), coord_bam])
+
+    # 3) collect qnames
+    res = subprocess.run(["samtools", "view", "-@", str(threads), coord_bam],
+                         check=True, capture_output=True, text=True)
+    qnames = set()
+    for ln in res.stdout.splitlines():
+        if ln and ln[0] != "@":
+            qnames.add(ln.split("\t", 1)[0])
+    if not qnames:
+        open(r1, "wb").close()
+        open(r2, "wb").close()
+        LOG.warning("No reads overlap regions; wrote empty FASTQs.")
+        return r1, r2
+
+    with open(qnames_txt, "w") as fh:
+        for q in sorted(qnames):
+            fh.write(q + "\n")
+    LOG.info("Found %d unique read names in regions", len(qnames))
+
+    # 4) pull full reads (mates may lie outside regions)
+    with open(full_bam, "wb") as out:
+        run(["samtools", "view", "-@", str(threads), "-b", "-h", "-N", qnames_txt, bam], stdout=out)
+
+    # 5) name sort and fastq
+    run(["samtools", "sort", "-@", str(threads), "-n", "-o", names_bam, full_bam])
+
+    # Write uncompressed then gzip
+    r1u = r1[:-3]
+    r2u = r2[:-3]
+    run(["samtools", "fastq", "-@", str(threads),
+         "-1", r1u, "-2", r2u, "-0", "/dev/null", "-s", "/dev/null", "-n", names_bam])
+    run(["gzip", "-f", r1u])
+    run(["gzip", "-f", r2u])
+
+    # tidy
+    for p in (region_bam, coord_bam, coord_bam + ".bai", full_bam, names_bam, qnames_txt):
+        try: os.remove(p)
+        except OSError: pass
+
+    LOG.info("R1: %s", file_size(r1))
+    LOG.info("R2: %s", file_size(r2))
+    return r1, r2
+
+
+# ---------------------------
+# CLI
+# ---------------------------
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Extract target gene regions, align to reference, and pull reads from BAM."
+    )
+    ap.add_argument("--bam", required=True, help="Aligned reads BAM")
+    ap.add_argument("--ref", required=True, help="Reference FASTA (alignment target)")
+    ap.add_argument("--genome", required=True, help="Source genome FASTA")
+    ap.add_argument("--gff", required=True, help="GFF3 for source genome")
+    ap.add_argument("--genes", required=True, nargs="+", help="Target gene names")
+    ap.add_argument("--outdir", default=".", help="Output directory")
+    ap.add_argument("--flank", type=int, default=1000, help="Flank size around regions")
+    ap.add_argument("--threads", type=int, default=1, help="Threads for tools")
+    ap.add_argument("--log-level", default="INFO",
+                    choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")
+    args = ap.parse_args()
+
+    os.makedirs(args.outdir, exist_ok=True)
+    log_path = os.path.join(args.outdir, "gene_extractor.log")
+    setup_logging(args.log_level, log_path)
+
+    LOG.info("Start. Outdir=%s; genes=%s", args.outdir, ",".join(args.genes))
+    check_tools(["samtools", "minimap2", "gzip"])
+
+    # 1) gene regions from genome
+    spans = parse_gff_gene_spans(args.gff, args.genes, args.flank)
+    if not spans:
+        return {}
+    gdict = load_genome_dict(args.genome)
+    gene_seqs: Dict[str, str] = {}
+    for g, info in spans.items():
+        contig = info["contig"]
+        if contig not in gdict:
+            LOG.warning(f"Contig not found for {g}: {info['contig']}")
+            continue
+        start = max(0, info["start"])
+        end   = min(len(gdict[contig]), info["end"])
+        seq = gdict[contig][start:end]
+        gene_seqs[g] = str(seq)
+        LOG.info(f"Extracted {g}: {len(seq)} bp")
+    LOG.info(f"Extracted {len(gene_seqs)}/{len(args.genes)} target gene regions")
+
+    if not gene_seqs:
+        LOG.error("No target gene regions found; exiting.")
+        sys.exit(1)
+
+    # 2) write regions FASTA
+    gene_fa = write_gene_fasta(gene_seqs, args.outdir)
+
+    # 3) align regions to reference, make BED +/- flank
+    bed = align_regions_to_ref(gene_fa, args.ref, args.outdir, args.threads)
+
+    # 4) masked genome (preserve original source coordinates +/- flank)
+    masked_file = mask_genome(gdict, spans, args.outdir)
+
+    # 5) extract reads overlapping BED
+    r1, r2 = extract_reads(args.bam, bed, args.outdir, args.threads)
+
+    LOG.info("Done.")
+    LOG.info(
+        '\n\t'.join([
+        "Outputs:",
+        f"Gene regions --> {gene_fa}",
+        f"Masked genome --> {masked_file}",
+        f"Regions BED --> {bed}",
+        f"R1 --> {r1}",
+        f"R2 --> {r2}" 
+        ]))
+
+
+if __name__ == "__main__":
+    main()

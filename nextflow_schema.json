@@ -1,8 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/DOH-JDJ0303/corgisnps/master/nextflow_schema.json",
-    "title": "DOH-JDJ0303/corgisnps pipeline parameters",
-    "description": "Core genome analysis workflow for fungal pathogens",
+    "$id": "https://raw.githubusercontent.com/DOH-JDJ0303/CorgiSNPs/master/nextflow_schema.json",
+    "title": "DOH-JDJ0303/CorgiSNPs pipeline parameters",
+    "description": "Fungal variant calling workflow.",
     "type": "object",
     "$defs": {
         "input_output_options": {
@@ -19,27 +19,241 @@
                     "schema": "assets/schema_input.json",
                     "mimetype": "text/csv",
                     "pattern": "^\\S+\\.csv$",
-                    "description": "Path to comma-separated file containing information about the samples in the experiment.",
+                    "description": "Path to input samplesheet",
                     "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row.",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "outdir": {
                     "type": "string",
                     "format": "directory-path",
-                    "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
+                    "description": "Output directory for results",
                     "fa_icon": "fas fa-folder-open"
+                },
+                "db": {
+                    "type": "string",
+                    "description": "Path to surviellance database",
+                    "fa_icon": "fas fa-database"
+                },
+                "microreact_template": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/template.microreact",
+                    "description": "Microreact template JSON for visualization."
                 },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",
                     "fa_icon": "fas fa-envelope",
                     "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
-                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
+                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
+                    "hidden": true
                 },
                 "multiqc_title": {
                     "type": "string",
-                    "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
-                    "fa_icon": "fas fa-file-signature"
+                    "description": "MultiQC report title (header and default filename stem).",
+                    "fa_icon": "fas fa-file-signature",
+                    "hidden": true
+                }
+            }
+        },
+        "workflow_toggles": {
+            "title": "Workflow toggles",
+            "type": "object",
+            "fa_icon": "fas fa-toggle-on",
+            "description": "Enable or disable major workflow stages.",
+            "properties": {
+                "classify": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable/disable classification."
+                },
+                "variants": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable/disable variant calling."
+                },
+                "amr": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable/disable AMR detection."
+                },
+                "phylo": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable/disable phylogenetic tree building."
+                },
+                "push": {
+                    "type": "boolean",
+                    "description": "Push outputs (e.g., to remote storage/registry)."
+                }
+            }
+        },
+        "assembly_pre_processing": {
+            "title": "Assembly / Pre-processing",
+            "type": "object",
+            "fa_icon": "fas fa-gears",
+            "description": "Assembler choice and basic contig filters.",
+            "properties": {
+                "assembler": {
+                    "type": "string",
+                    "default": "skesa",
+                    "description": "Assembler to use (e.g., skesa, shovill)."
+                },
+                "shovill_depth": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Target depth for shovill downsampling."
+                },
+                "genome_size": {
+                    "type": "integer",
+                    "default": 12500000,
+                    "description": "Expected genome size (bp)."
+                },
+                "min_contig_cov": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "Minimum contig coverage to retain."
+                },
+                "min_contig_len": {
+                    "type": "integer",
+                    "default": 300,
+                    "description": "Minimum contig length to retain (bp)."
+                }
+            }
+        },
+        "databases": {
+            "title": "Databases",
+            "type": "object",
+            "fa_icon": "fas fa-database",
+            "description": "Paths to required DBs/resources.",
+            "properties": {
+                "gambit_db": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/gambit_db/gambit-fungal-metadata-1.0.0-20241213.gdb",
+                    "description": "Path to Gambit fungal metadata DB."
+                },
+                "gambit_h5_dir": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/gambit_db/signatures/",
+                    "description": "Directory of Gambit signatures (HDF5)."
+                },
+                "subtype_db": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/sourmash_db/",
+                    "description": "Directory of subtyping signatures (Sourmash DB)."
+                },
+                "reference_db": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/reference_db/manifest.json",
+                    "description": "Reference genome manifest JSON."
+                },
+                "snpeff_db": {
+                    "type": "string",
+                    "default": "${projectDir}/assets/snpeff_db",
+                    "description": "SnpEff database directory for variant annotation."
+                }
+            }
+        },
+        "variant_calling_parameters": {
+            "title": "Variant calling parameters",
+            "type": "object",
+            "fa_icon": "fas fa-dna",
+            "description": "Depth, quality, and bias thresholds used for calls/consensus.",
+            "properties": {
+                "ploidy": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Expected ploidy of the organism."
+                },
+                "max_reads": {
+                    "type": "integer",
+                    "default": 10000000,
+                    "description": "Maximum reads to process (subsampling)"
+                },
+                "limit_coverage": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Maximum allowed site coverage (reads/site)."
+                },
+                "min_base_depth": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Minimum read depth (per allele/site)."
+                },
+                "min_base_quality": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Minimum mean base quality (Phred) per allele/site."
+                },
+                "min_mapping_quality": {
+                    "type": "integer",
+                    "default": 40,
+                    "description": "Minimum mean mapping quality (Phred) per allele."
+                },
+                "min_allele_fraction": {
+                    "type": "number",
+                    "default": 0.8,
+                    "description": "Minimum fraction of reads supporting an allele (e.g., haploid 0.8; diploid/triploid 0.25)."
+                },
+                "min_fwd_strand_fraction": {
+                    "type": "number",
+                    "default": 0.1,
+                    "description": "Minimum forward-strand fraction for strand balance."
+                },
+                "max_strand_bias": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Maximum strand-bias score (per allele)."
+                },
+                "max_read_pos_bias": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Maximum read-position-bias score (per allele)."
+                }
+            }
+        },
+        "amr_options": {
+            "title": "AMR options",
+            "type": "object",
+            "fa_icon": "fas fa-shield-virus",
+            "description": "Targets and parameters for AMR detection.",
+            "properties": {
+                "amr_genes": {
+                    "type": "string",
+                    "default": "FKS1",
+                    "description": "List/CSV of AMR target genes."
+                }
+            }
+        },
+        "phylo_options": {
+            "title": "Phylogenetic Paramaters",
+            "type": "object",
+            "fa_icon": "fas fa-project-diagram",
+            "description": "Paramaters for phylogenetic analysis analsysis.",
+            "properties": {
+                "min_genome_fraction": {
+                    "type": "number",
+                    "default": 0.9,
+                    "description": "Min. genome fraction for a sample to be included in the core analysis."
+                },
+                "min_core_fraction": {
+                    "type": "number",
+                    "default": 0.9,
+                    "description": "Min. population fraction for a site to be included in the core analysis."
+                },
+                "strong_link_threshold": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Threshold for defining strong links between nodes."
+                },
+                "inter_link_threshold": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Threshold for defining intermediate links between nodes."
+                },
+                "partition_distance": {
+                    "type": "integer",
+                    "default": 25,
+                    "description": "Maximum distance for partitioning clusters."
                 }
             }
         },
@@ -52,14 +266,14 @@
             "properties": {
                 "custom_config_version": {
                     "type": "string",
-                    "description": "Git commit id for Institutional configs.",
+                    "description": "Git commit id for institutional configs.",
                     "default": "master",
                     "hidden": true,
                     "fa_icon": "fas fa-users-cog"
                 },
                 "custom_config_base": {
                     "type": "string",
-                    "description": "Base directory for Institutional configs.",
+                    "description": "Base URL for institutional configs.",
                     "default": "https://raw.githubusercontent.com/nf-core/configs/master",
                     "hidden": true,
                     "help_text": "If you're running offline, Nextflow will not be able to fetch the institutional config files from the internet. If you don't need them, then this is not a problem. If you do need them, you should download the files from the repo and tell Nextflow where to find them with this parameter.",
@@ -107,15 +321,15 @@
                 "publish_dir_mode": {
                     "type": "string",
                     "default": "copy",
-                    "description": "Method used to save pipeline results to output directory.",
-                    "help_text": "The Nextflow `publishDir` option specifies which intermediate files should be saved to the output directory. This option tells the pipeline what method should be used to move these files. See [Nextflow docs](https://www.nextflow.io/docs/latest/process.html#publishdir) for details.",
+                    "description": "Publish method for results (symlink|rellink|link|copy|copyNoFollow|move).",
+                    "help_text": "The Nextflow `publishDir` option specifies which intermediate files should be saved to the output directory. This option tells the pipeline what method should be used to move these files. See Nextflow docs for details.",
                     "fa_icon": "fas fa-copy",
                     "enum": ["symlink", "rellink", "link", "copy", "copyNoFollow", "move"],
                     "hidden": true
                 },
                 "email_on_fail": {
                     "type": "string",
-                    "description": "Email address for completion summary, only when pipeline fails.",
+                    "description": "Email address for summary only on pipeline failure.",
                     "fa_icon": "fas fa-exclamation-triangle",
                     "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
                     "help_text": "An email address to send a summary email to when the pipeline is completed - ONLY sent if the pipeline does not exit successfully.",
@@ -129,7 +343,7 @@
                 },
                 "max_multiqc_email_size": {
                     "type": "string",
-                    "description": "File size limit when attaching MultiQC reports to summary emails.",
+                    "description": "Size limit for attaching MultiQC to emails (e.g., 25.MB).",
                     "pattern": "^\\d+(\\.\\d+)?\\.?\\s*(K|M|G|T)?B$",
                     "default": "25.MB",
                     "fa_icon": "fas fa-file-upload",
@@ -137,13 +351,13 @@
                 },
                 "monochrome_logs": {
                     "type": "boolean",
-                    "description": "Do not use coloured log outputs.",
+                    "description": "Disable coloured log output.",
                     "fa_icon": "fas fa-palette",
                     "hidden": true
                 },
                 "hook_url": {
                     "type": "string",
-                    "description": "Incoming hook URL for messaging service",
+                    "description": "Incoming hook URL for messaging (Slack/MS Teams).",
                     "fa_icon": "fas fa-people-group",
                     "help_text": "Incoming hook URL for messaging service. Currently, MS Teams and Slack are supported.",
                     "hidden": true
@@ -151,19 +365,24 @@
                 "multiqc_config": {
                     "type": "string",
                     "format": "file-path",
-                    "description": "Custom config file to supply to MultiQC.",
+                    "description": "Custom MultiQC config file.",
                     "fa_icon": "fas fa-cog",
                     "hidden": true
                 },
                 "multiqc_logo": {
                     "type": "string",
-                    "description": "Custom logo file to supply to MultiQC. File name must also be set in the MultiQC config file",
+                    "description": "Custom logo file for MultiQC (also set in MultiQC config).",
                     "fa_icon": "fas fa-image",
                     "hidden": true
                 },
+                "multiqc_methods_description": {
+                    "type": "string",
+                    "description": "Custom MultiQC YAML with HTML methods description.",
+                    "fa_icon": "fas fa-cog"
+                },
                 "validate_params": {
                     "type": "boolean",
-                    "description": "Boolean whether to validate parameters against the schema at runtime",
+                    "description": "Validate parameters against schema at runtime.",
                     "default": true,
                     "fa_icon": "fas fa-check-square",
                     "hidden": true
@@ -171,14 +390,14 @@
                 "pipelines_testdata_base_path": {
                     "type": "string",
                     "fa_icon": "far fa-check-circle",
-                    "description": "Base URL or local path to location of pipeline test dataset files",
+                    "description": "Base URL/path for pipeline test datasets.",
                     "default": "https://raw.githubusercontent.com/nf-core/test-datasets/",
                     "hidden": true
                 },
                 "trace_report_suffix": {
                     "type": "string",
                     "fa_icon": "far calendar",
-                    "description": "Suffix to add to the trace report filename. Default is the date and time in the format yyyy-MM-dd_HH-mm-ss.",
+                    "description": "Suffix for trace report filename (default: yyyy-MM-dd_HH-mm-ss).",
                     "hidden": true
                 }
             }
@@ -189,10 +408,50 @@
             "$ref": "#/$defs/input_output_options"
         },
         {
+            "$ref": "#/$defs/workflow_toggles"
+        },
+        {
+            "$ref": "#/$defs/assembly_pre_processing"
+        },
+        {
+            "$ref": "#/$defs/databases"
+        },
+        {
+            "$ref": "#/$defs/variant_calling_parameters"
+        },
+        {
+            "$ref": "#/$defs/amr_options"
+        },
+        {
+            "$ref": "#/$defs/phylo_options"
+        },
+        {
             "$ref": "#/$defs/institutional_config_options"
         },
         {
             "$ref": "#/$defs/generic_options"
         }
-    ]
+    ],
+    "properties": {
+        "auto_qc": {
+            "type": "boolean",
+            "default": true
+        },
+        "min_depth_qc": {
+            "type": "integer",
+            "default": 20
+        },
+        "min_q30_rate_qc": {
+            "type": "number",
+            "default": 0.8
+        },
+        "max_z_score_qc": {
+            "type": "number",
+            "default": 2.58
+        },
+        "ncbi_stats": {
+            "type": "string",
+            "default": "${projectDir}/assets/ncbi_stats/2025-09-24_NCBI_eukaryotes_stats.txt"
+        }
+    }
 }
