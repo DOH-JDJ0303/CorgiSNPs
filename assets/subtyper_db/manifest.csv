@@ -1,2 +1,3 @@
 taxon,signature_filepath
 Candida auris,signatures/candida_auris_clades.sig
+Candidozyma auris,signatures/candidozyma_auris_clades.sig

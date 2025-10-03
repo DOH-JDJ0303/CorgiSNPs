@@ -35,10 +35,6 @@ process GAMBIT_QUERY {
 
     gambit ${args} -d ./ query ${assembly} > ${prefix}_gambit.csv
 
-    rm ${output_h5_file}
-    # Replace "Candidozyma auris" with "Candida auris" in the output CSV
-    sed -i 's/Candidozyma auris/Candida auris/g' ${prefix}_gambit.csv
-
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         gambit: \$(gambit --version | tr -d "[a-z, ]")

@@ -157,11 +157,20 @@ workflow CORGISNPS {
             )
             ch_versions = ch_versions.mix(AMR.out.versions)
             
+            ch_summary_pass
+                .join(AMR.out.summary, remainder: true)
+                .branch{ meta, summaryline, amr_summary -> 
+                    db_exists: amr_summary
+                    db_miss: !amr_summary  }
+                .set{ ch_summary_pass_amr }
+
             ADD_AMR(
-                ch_summary_pass.join(AMR.out.summary)
+                ch_summary_pass_amr.db_exists
             )
             ch_versions = ch_versions.mix(ADD_AMR.out.versions)
-            ADD_AMR.out.summary.set{ ch_summary_pass }
+            ADD_AMR.out.summary
+                .concat(ch_summary_pass_amr.db_miss.map{[it[0],it[1]]})
+                .set{ ch_summary_pass }
         }
         if(params.phylo){
             PHYLO(

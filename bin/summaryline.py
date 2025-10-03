@@ -29,49 +29,73 @@ def load_csv(path: str, source: Optional[str] = None) -> List[Dict[str, str]]:
     return data
 
 
-def load_fasta(path: str) -> List[Dict[str, Any]]:
-    """Load FASTA with screed and return a list of records."""
-    data = list(screed.open(path))
-    logging.info(f"Loaded FASTA with {len(data)} contigs")
-    return data
+def load_fasta(path: str):
+    """Return a context manager over screed records for streaming."""
+    return screed.open(path)
 
 
 def z_score(value: float, mean: float, sd: float) -> Optional[float]:
-    if sd > 0 and mean > 0:
+    # z-score is valid for any mean; only sd must be > 0
+    if sd and sd > 0:
         return (value - mean) / sd
     return None
 
 
-def genome_stats(fa: List[Dict[str, Any]]) -> Dict[str, Any]:
-    contigs = len(fa)
-    seq = ''.join([r.get('sequence', '') for r in fa]).upper()
-    length = len(seq)
-    gc = 100 * (seq.count('G') + seq.count('C')) / length if length > 0 else None
+def genome_stats(records) -> Dict[str, Any]:
+    """
+    Stream through FASTA once; avoid building a giant string and avoid .get on screed records.
+    """
+    contigs = 0
+    length = 0
+    gc_count = 0
+    for rec in records:
+        seq = rec.sequence.upper()
+        contigs += 1
+        length += len(seq)
+        gc_count += (seq.count('G') + seq.count('C'))
+    gc = (100.0 * gc_count / length) if length > 0 else None
+    logging.info(f"Loaded FASTA with {contigs} contigs")
     return {'denovo_contigs': contigs, 'denovo_length': length, 'denovo_gc': gc}
 
 
 def taxid_stats(data: Dict[str, Any],
                 ncbi_stats: List[Dict[str, str]],
-                taxid: str,
+                taxid: Any,
                 min_n: int) -> Dict[str, Any]:
+    """
+    Attach z-scores for assembly length and GC if ncbi_stats has enough samples.
+    Prefer exact taxid match; fall back to case-insensitive name match.
+    """
     res: Dict[str, Any] = {}
 
+    name = (data.get('species') or '').strip()
     length = data.get('denovo_length', 0)
-    gc = data.get('denovo_gc', 0)
-    if not length or not gc:
+    gc = data.get('denovo_gc', None)
+    if not length or gc is None:
         return res
 
+    wanted_taxid = (str(taxid).strip() if taxid is not None else None)
+
     for rec in ncbi_stats:
-        if taxid == rec.get('taxid', ''):
-            length_mean = float(rec.get("length_mean", 0) or 0)
-            length_sd = float(rec.get("length_stdev", 0) or 0)
-            gc_mean = float(rec.get("gc_mean", 0) or 0)
-            gc_sd = float(rec.get("gc_stdev", 0) or 0)
-            n = int(float(rec.get("n", 0) or 0))
-            if n > min_n:
-                res['denovo_length_z'] = z_score(float(length), length_mean, length_sd)
-                res['denovo_gc_z'] = z_score(float(gc), gc_mean, gc_sd)
-            break
+        rec_taxid = (str(rec.get('taxid') or '').strip() or None)
+        rec_name  = (rec.get('name') or '').strip()
+
+        taxid_match = bool(wanted_taxid and rec_taxid and rec_taxid == wanted_taxid)
+        name_match  = bool(name and rec_name and rec_name.lower() == name.lower())
+        if not (taxid_match or name_match):
+            continue
+
+        length_mean = float(rec.get("length_mean") or 0)
+        length_sd   = float(rec.get("length_stdev") or 0)
+        gc_mean     = float(rec.get("gc_mean") or 0)
+        gc_sd       = float(rec.get("gc_stdev") or 0)
+        n           = int(float(rec.get("n") or 0))
+
+        if n >= min_n:
+            res['denovo_length_z'] = z_score(float(length), length_mean, length_sd)
+            res['denovo_gc_z']     = z_score(float(gc), gc_mean, gc_sd)
+        break
+
     return res
 
 
@@ -111,11 +135,12 @@ def auto_qc(data: Dict[str, Any],
             min_depth: int,
             min_qual: float,
             max_z: float) -> Dict[str, Any]:
-    req_cols = ['species', 'subtype', 'denovo_depth',
-                'denovo_length_z', 'denovo_gc_z', 'q30_rate_after_filtering']
+
     qc_status = 'PASS'
     qc_reason: List[str] = []
 
+    # Require only the essentials; z-scores are optional below
+    req_cols = ['species', 'subtype', 'denovo_depth', 'q30_rate_after_filtering']
     for col in req_cols:
         if col not in data:
             return data | {'qc_status': 'UNKNOWN',
@@ -138,7 +163,7 @@ def auto_qc(data: Dict[str, Any],
         qc_status = 'UNKNOWN'
         qc_reason.append('Invalid assembly depth')
 
-    # Z-score checks (only if present and numeric)
+    # Optional z-score checks
     for key, label in [('denovo_length_z', 'Unusual assembly length'),
                        ('denovo_gc_z', 'Unusual GC content')]:
         val = data.get(key)
@@ -154,19 +179,20 @@ def auto_qc(data: Dict[str, Any],
 
 
 def parse_samplesheet(data: List[Dict[str, str]], sample: str) -> Dict[str, Any]:
-    name = None
+    found = False
     out: Dict[str, Any] = {}
     for rec in data:
-        name = rec.get('sample')
-        if not name or name != sample:
+        rec_name = rec.get('sample')
+        if not rec_name or rec_name != sample:
             continue
-        if 'species' in rec and rec['species']:
+        found = True
+        if rec.get('species'):
             out |= {'species': rec['species'], 'species_confidence': 'Manual'}
-        if 'subtype' in rec and rec['subtype']:
+        if rec.get('subtype'):
             out |= {'subtype': rec['subtype']}
-        if 'reference' in rec and rec['reference']:
+        if rec.get('reference'):
             out |= {'reference': rec['reference'], 'reference_source': 'Manual'}
-    if not name:
+    if not found:
         logging.warning(f"{sample} not found in samplesheet!")
     elif out:
         logging.info(f"Using values from samplesheet: {list(out.keys())}")
@@ -253,11 +279,9 @@ def main():
 
     # De novo / assembly stats
     denovo_cols: List[str] = []
-    if data.get('species_confidence') == 'Manual':
-        logging.info("Species and subtype supplied manually - de novo assembly was not performed!")
-    elif args.denovo:
-        fasta_records = load_fasta(args.denovo)
-        genome_stats_data = genome_stats(fasta_records)
+    if args.denovo:
+        with load_fasta(args.denovo) as fasta_records:
+            genome_stats_data = genome_stats(fasta_records)
         data |= genome_stats_data
         denovo_cols = list(genome_stats_data.keys())
     else:
@@ -279,7 +303,9 @@ def main():
     length = data.get('denovo_length', 0)
     if bases and length:
         try:
-            data['denovo_depth'] = int(round(int(bases) / int(length), 0)) if int(length) > 0 else 0
+            b = float(bases)
+            L = float(length)
+            data['denovo_depth'] = int(round(b / L)) if L > 0 else 0
             depth_col = ['denovo_depth']
         except (TypeError, ValueError):
             logging.warning("Could not compute read depth due to invalid values")
@@ -288,7 +314,7 @@ def main():
 
     # Taxid z-scores
     taxid_cols: List[str] = []
-    if all(c in data for c in ['denovo_length', 'denovo_gc']) and args.ncbi_stats and taxid:
+    if all(c in data for c in ['denovo_length', 'denovo_gc']) and args.ncbi_stats:
         ncbi_stats_data = load_csv(args.ncbi_stats, 'ncbi_stats')
         taxid_stats_data = taxid_stats(data, ncbi_stats_data, taxid, args.min_ncbi_stats_n)
         data |= taxid_stats_data
@@ -296,7 +322,7 @@ def main():
     else:
         logging.warning("Z-scores not calculated for assembly length and GC")
 
-    # Auto QC
+    # Auto QC (z-scores are optional; included if present)
     data = auto_qc(data, args.min_depth, args.min_qual, args.max_z_score)
 
     # Normalize values
@@ -304,7 +330,8 @@ def main():
         # list values to semicolon-joined strings (e.g., qc_reason)
         if isinstance(v, list):
             data[k] = ';'.join(map(str, v))
-        elif isinstance(v, float):
+        # round floats but keep depth as int
+        elif isinstance(v, float) and not k.endswith('_depth'):
             data[k] = round(v, 2)
 
     # Output

@@ -38,6 +38,7 @@ def summarize_by_taxid(rows):
         if not taxid:
             continue
 
+        name = rec.get('#Organism/Name', None)
         gc = parse_float(rec.get("GC%"))
         size_mb = parse_float(rec.get("Size (Mb)"))
         
@@ -48,10 +49,12 @@ def summarize_by_taxid(rows):
         size_bp = int(size_mb * 1_000_000)
 
         if taxid not in by_taxid:
-            by_taxid[taxid] = {"gc": [], "length": []}
+            by_taxid[taxid] = {"gc": [], "length": [], "name": []}
         
         by_taxid[taxid]["gc"].append(gc)
         by_taxid[taxid]["length"].append(size_bp)
+        if name:
+            by_taxid[taxid]["name"].append(name)
 
     # Generate summary stats
     summary = []
@@ -62,6 +65,7 @@ def summarize_by_taxid(rows):
             
         record = {
             "taxid": taxid,
+            "name": list(set(data["name"]))[0],
             "n": n,
             "gc_mean": statistics.mean(data["gc"]),
             "gc_stdev": statistics.stdev(data["gc"]) if n > 1 else None,
@@ -75,10 +79,10 @@ def summarize_by_taxid(rows):
 def write_csv(rows, path):
     if not rows:
         with open(path, "w", newline="") as f:
-            f.write("taxid,n,gc_mean,gc_stdev,length_mean,length_stdev\n")
+            f.write("taxid,name,n,gc_mean,gc_stdev,length_mean,length_stdev\n")
         return
 
-    fieldnames = ["taxid", "n", "gc_mean", "gc_stdev", "length_mean", "length_stdev"]
+    fieldnames = ["taxid", "name", "n", "gc_mean", "gc_stdev", "length_mean", "length_stdev"]
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -86,9 +90,11 @@ def write_csv(rows, path):
 
 def main():
     src = 'eukaryotes.txt'
-
-    print(f"Downloading {URL} -> {src}")
-    download(URL, src)
+    if not os.path.exists(src):
+        print(f"Downloading {URL} -> {src}")
+        download(URL, src)
+    else:
+        print(f"Using existing {src}")
 
     print("Parsing...")
     with open(src, newline="", encoding="utf-8") as f:
@@ -97,6 +103,17 @@ def main():
 
     print("Summarizing by TaxID...")
     summary = summarize_by_taxid(rows)
+
+    for rec in summary:
+        if '[Candida]' in rec.get('name', ''):
+            rec_cp = rec.copy()
+            rec_cp['name'] = rec_cp['name'].replace('[Candida]', 'Candida')
+            summary.append(rec_cp)
+        if rec.get('name', '') == '[Candida] auris':
+            rec_cp = rec.copy()
+            rec_cp['name'] = 'Candidozyma auris'
+            summary.append(rec_cp)
+
     summary_path = f"{ts}_NCBI_eukaryotes_stats.txt"
     write_csv(summary, summary_path)
     print(f"Wrote {len(summary)} taxa with complete data: {summary_path}")
