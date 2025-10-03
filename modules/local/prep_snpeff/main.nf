@@ -12,7 +12,7 @@ process PREP_SNPEFF {
 
     script:
     def args = task.ext.args ?: ''
-    sp_dir = "${snpeff_db}/data/${species}"
+    sp_dir = "${snpeff_db}/data/${species == 'candida_auris' ? 'candidozyma_auris' : species}"
     """
     """
 }
