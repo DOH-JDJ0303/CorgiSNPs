@@ -74,7 +74,7 @@ process REPORT_ALL {
     path summarylines
 
     output:
-    path "MycoSNP-summary.csv", emit: summary
+    path "CorgiSNPs-summary.csv", emit: summary
     path "versions.yml",        emit: versions
     
     script:
