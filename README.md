@@ -48,7 +48,7 @@ nextflow run DOH-JDJ0303/CorgiSNPs \
 ## Acknowledgements
 
 CorgiSNPs would not be possible without the contributions of:
-- Washington State Department of Health – Public Health Laboratories \
+- Washington State Department of Health – Public Health Laboratories
 - Collaborators at CDC Mycotics Branch
 - nf-core and the broader Nextflow community
 
