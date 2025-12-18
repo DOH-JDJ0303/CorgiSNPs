@@ -21,8 +21,7 @@ process POLYCORE {
     prefix = "${species}-${subtype}"
     """
     polycore \\
-        --ref ${ref} \\
-        --sample ${assemblies} \\
+        ${ref} ${assemblies} \\
         --min-gf ${params.min_genome_fraction} \\
         --min-cf ${params.min_core_fraction} \\
         --ploidy ${params.ploidy} \\

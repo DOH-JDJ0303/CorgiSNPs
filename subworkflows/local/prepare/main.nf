@@ -60,10 +60,7 @@ workflow PREPARE {
         .join(FASTERQDUMP.out.reads, by: 0)
         .map   { meta, empty_reads, sp, sb, ref, sra, reads -> [ meta, reads, sp, sb, ref ] }
         .concat( ch_sra_branch.sra_false.map { meta, reads, sp, sb, ref, sra -> [ meta, reads, sp, sb, ref ] } )
-        .map { meta, reads, sp, sb, ref ->
-            meta.single_end = (reads.size() == 1)
-            [ meta, reads, sp, sb, ref ]
-        }
+        .map { meta, reads, sp, sb, ref -> [ [id: meta.id, single_end: (reads.size() == 1)], reads, sp, sb, ref ]}
         .set { ch_samplesheet }
 
     // Split into read and meta streams for downstream modules
