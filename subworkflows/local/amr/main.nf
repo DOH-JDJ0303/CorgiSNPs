@@ -52,7 +52,7 @@ workflow AMR {
     // Determine per-sample whether all checksums agree (same reference)
     ch_ref_match = COMPARE_REFS.out.txt
         .splitText()
-        .map       { meta, line -> [ meta, line.split()[1] ] } // [meta, checksum]
+        .map       { meta, line -> [ meta, line.split()[0] ] } // [meta, checksum]
         .groupTuple()
         .map       { meta, checksums -> [ meta, checksums.unique().size() == 1 ] }
 
