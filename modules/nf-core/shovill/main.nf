@@ -21,6 +21,7 @@ process SHOVILL {
     task.ext.when == null || task.ext.when
 
     script:
+    def gsize = (params.genome_size == 0) ? '--gsize ""' : "--gsize ${params.genome_size}"
     def args = task.ext.args ?: ''
     def memory = task.memory.toGiga()
     """

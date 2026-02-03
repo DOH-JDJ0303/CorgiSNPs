@@ -108,8 +108,8 @@
                 },
                 "genome_size": {
                     "type": "integer",
-                    "default": 12500000,
-                    "description": "Expected genome size (bp)."
+                    "default": 0,
+                    "description": "Expected genome size (bp). For autodetect use 0."
                 },
                 "min_contig_cov": {
                     "type": "integer",
