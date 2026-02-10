@@ -117,22 +117,19 @@ def calculate_taxid_stats(
     """
     result: Dict[str, Any] = {}
 
-    assembly_length = data.get('denovo_length', 0)
-    assembly_gc = data.get('denovo_gc', 0)
-
     # Determine what to match on
     target = taxid if taxid else data.get('species')
-    match_column = 'taxid' if taxid else 'name'
+    match_column = 'taxids' if taxid else 'names'
 
     target = normalize_value(target)
     if not target:
         return result
-    
+            
     # Find matching reference stats
     for rec in ncbi_stats:
-        rec_value = normalize_value(rec.get(match_column))
+        rec_values = [ normalize_value(v) for v in rec.get(match_column, []) ]
         
-        if not rec_value or target != rec_value:
+        if target not in rec_values:
             continue
         
         # Extract reference statistics
@@ -147,20 +144,27 @@ def calculate_taxid_stats(
             logging.warning(f"Insufficient reference samples (n={n_samples}, min={min_n})")
             return result
         
-        # Calculate z-scores
-        result['denovo_length_z'] = calculate_z_score(
-            float(assembly_length), length_mean, length_sd
-        )
-        result['denovo_gc_z'] = calculate_z_score(
-            float(assembly_gc), gc_mean, gc_sd
-        )
-
         # Estimate sequencing depth
         total_bases = data.get('total_bases_after_filtering', 0)
         if length_mean > 0:
             result['estimated_depth'] = int(round(float(total_bases) / float(length_mean)))
         else:
             result['estimated_depth'] = 0
+
+    
+        # Calculate z-scores
+        if 'denovo_length' not in data:
+            continue
+
+        assembly_length = float(data.get('denovo_length', 0))
+        assembly_gc = float(data.get('denovo_gc', 0))
+        
+        result['denovo_length_z'] = calculate_z_score(
+            assembly_length, length_mean, length_sd
+        )
+        result['denovo_gc_z'] = calculate_z_score(
+            assembly_gc, gc_mean, gc_sd
+        )
 
         logging.info(f"Calculated z-scores using {n_samples} reference genomes")
         break
@@ -246,16 +250,19 @@ def perform_auto_qc(
     - GC content z-score < threshold (if available)
     """
     qc_status = 'PASS'
-    qc_reasons: List[str] = []
+    qc_und: List[str] = []
+    qc_fail: List[str] = []
+    qc_error: List[str] = []
+
 
     # Define QC criteria (field: (operator, threshold) or None for required)
     qc_criteria = {
+        'q30_rate_after_filtering': ('>=', min_qual),
         'species': None,
         'subtype': None,
-        'q30_rate_after_filtering': ('>=', min_qual),
         'estimated_depth': ('>=', min_depth),
-        'denovo_length_z': ('<', max_z),  # Fixed: should be < not >=
-        'denovo_gc_z': ('<', max_z)        # Fixed: should be < not >=
+        'denovo_length_z': ('<', max_z),
+        'denovo_gc_z': ('<', max_z)
     }
     
     for field, criterion in qc_criteria.items():
@@ -263,9 +270,11 @@ def perform_auto_qc(
 
         # Check if field exists
         if value is None:
+            qc_und.append(field)
+            if field.startswith('denovo'):
+                continue
             qc_status = 'FAIL'
-            qc_reasons.append(f"{field} not determined")
-            continue
+            break
 
         # If no criterion specified, just check for presence
         if criterion is None:
@@ -281,18 +290,24 @@ def perform_auto_qc(
             
             if not compare_values(value, operator, threshold):
                 qc_status = 'FAIL'
-                qc_reasons.append(f"{field}={value} fails {operator}{threshold}")
+                qc_fail.append(f"{field} {operator} {threshold}")
         except Exception as e:
             qc_status = 'FAIL'
-            qc_reasons.append(f"{field} comparison error: {e}")
+            qc_error.append(field)
             logging.error(f"QC comparison failed for {field}: {e}")
+    
+    qc_reasons = [ 
+        f"Undetermined: {', '.join(qc_und)}" if qc_und else '', 
+        f"Failure: {', '.join(qc_fail)}" if qc_fail else '', 
+        f"Error: {', '.join(qc_error)}" if qc_error else ''
+    ]
 
     data['qc_status'] = qc_status
-    data['qc_reason'] = qc_reasons
+    data['qc_reason'] = '; '.join([r for r in qc_reasons if r])
     
-    logging.info(f"QC Status: {qc_status}")
+    logging.info(f"QC Status: {data['qc_status']}")
     if qc_reasons:
-        logging.info(f"QC Reasons: {'; '.join(qc_reasons)}")
+        logging.info(f"QC Reasons: {data['qc_reason']}")
     
     return data
 
@@ -329,7 +344,7 @@ def main():
                         help="De novo assembly (FASTA)")
     
     # QC parameters
-    parser.add_argument("--min_ncbi_stats_n", type=int, default=10,
+    parser.add_argument("--min_ncbi_stats_n", type=int, default=3,
                         help="Minimum samples in NCBI stats for z-score calculation")
     parser.add_argument("--min_depth", type=int, default=20,
                         help="Minimum read depth for QC pass")
@@ -417,7 +432,7 @@ def main():
     # Calculate z-scores using NCBI reference data
     if args.ncbi_stats:
         logging.info("Calculating z-scores from NCBI reference statistics")
-        ncbi_stats_data = load_csv(args.ncbi_stats, 'ncbi_stats')
+        ncbi_stats_data = load_json(args.ncbi_stats, 'ncbi_stats')
         taxid_stats_data = calculate_taxid_stats(
             data, ncbi_stats_data, taxid, args.min_ncbi_stats_n
         )
