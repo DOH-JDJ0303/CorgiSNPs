@@ -134,9 +134,9 @@ def calculate_taxid_stats(
         
         # Extract reference statistics
         length_mean = float(rec.get("length_mean", 0))
-        length_sd = float(rec.get("length_stdev", 0))
+        length_sd = float(rec["length_stdev"]) if rec.get("length_stdev") is not None else None
         gc_mean = float(rec.get("gc_mean", 0))
-        gc_sd = float(rec.get("gc_stdev", 0))
+        gc_sd = float(rec["gc_stdev"]) if rec.get("gc_stdev") is not None else None
         n_samples = int(rec.get("n", 0))
 
         # Only calculate if sufficient reference samples
