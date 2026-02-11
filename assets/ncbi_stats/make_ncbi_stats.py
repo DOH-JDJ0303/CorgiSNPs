@@ -34,11 +34,6 @@ def parse_float(val):
         return None
 
 
-from pathlib import Path
-import json
-import subprocess
-
-
 def pull_taxids(taxids_file="taxids.txt", json_out="taxid_species.json"):
     """
     Query NCBI taxonomy database to get species-level information for taxids.
