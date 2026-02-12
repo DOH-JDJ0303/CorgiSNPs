@@ -139,11 +139,6 @@ def calculate_taxid_stats(
         gc_sd = float(rec["gc_stdev"]) if rec.get("gc_stdev") is not None else None
         n_samples = int(rec.get("n", 0))
 
-        # Only calculate if sufficient reference samples
-        if n_samples < min_n:
-            logging.warning(f"Insufficient reference samples (n={n_samples}, min={min_n})")
-            return result
-        
         # Estimate sequencing depth
         total_bases = data.get('total_bases_after_filtering', 0)
         if length_mean > 0:
@@ -151,6 +146,10 @@ def calculate_taxid_stats(
         else:
             result['estimated_depth'] = 0
 
+        # Only calculate z-scores if sufficient reference samples
+        if n_samples < min_n:
+            logging.warning(f"Insufficient reference samples to calculate z-scores (n={n_samples}, min={min_n})")
+            return result
     
         # Calculate z-scores
         if 'denovo_length' not in data:
