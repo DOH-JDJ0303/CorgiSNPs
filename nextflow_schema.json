@@ -39,7 +39,7 @@
                 },
                 "microreact_template": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/template.microreact",
+                    "default": "{projectDir}/assets/template.microreact",
                     "description": "Microreact template JSON for visualization."
                 },
                 "email": {
@@ -131,32 +131,32 @@
             "properties": {
                 "gambit_db": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/gambit_db/gambit-fungal-metadata-1.0.0-20241213.gdb",
+                    "default": "{projectDir}/assets/gambit_db/gambit-fungal-metadata-1.0.0-20241213.gdb",
                     "description": "Path to Gambit fungal metadata DB."
                 },
                 "gambit_h5_dir": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/gambit_db/signatures/",
+                    "default": "{projectDir}/assets/gambit_db/signatures/",
                     "description": "Directory of Gambit signatures (HDF5)."
                 },
                 "subtype_db": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/subtyper_db/",
+                    "default": "{projectDir}/assets/subtyper_db/",
                     "description": "Directory of subtyping signatures (Sourmash DB)."
                 },
                 "reference_db": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/reference_db/manifest.json",
+                    "default": "{projectDir}/assets/reference_db/manifest.json",
                     "description": "Reference genome manifest JSON."
                 },
                 "snpeff_db": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/snpeff_db",
+                    "default": "{projectDir}/assets/snpeff_db",
                     "description": "SnpEff database directory for variant annotation."
                 },
                 "ncbi_stats": {
                     "type": "string",
-                    "default": "/home/jdj0303/dev/mycosnp/fks1_variants/DOH-JDJ0303-corgisnps/assets/ncbi_stats/2025-10-03_NCBI_eukaryotes_stats.txt",
+                    "default": "{projectDir}/assets/ncbi_stats/2026-02-10_ncbi-fungal-sp.json",
                     "description": "Genome statistics for fungal species hosted on NCBI"
                 }
             }

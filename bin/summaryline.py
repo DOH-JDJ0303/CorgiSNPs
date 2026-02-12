@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+Summarize outputs from bioinformatics workflows.
+
+Aggregates read statistics, species identification, assembly metrics,
+and performs automated QC checks.
+"""
 
 import json
 import csv
@@ -9,7 +15,38 @@ from typing import List, Dict, Any, Optional
 
 
 # ----------------------------
-# File helper functions
+# Helper Functions
+# ----------------------------
+
+def normalize_value(value: Any) -> Optional[str]:
+    """Normalize string values for comparison."""
+    if value is None:
+        return None
+    return str(value).lower().strip()
+
+
+def calculate_z_score(value: float, mean: float, sd: float) -> Optional[float]:
+    """Calculate z-score if standard deviation is valid."""
+    if sd and sd > 0:
+        return (value - mean) / sd
+    return None
+
+
+def compare_values(a: Any, op: str, b: Any) -> bool:
+    """Compare two values using the specified operator."""
+    operators = {
+        "<": lambda x, y: x < y,
+        "<=": lambda x, y: x <= y,
+        "==": lambda x, y: x == y,
+        "!=": lambda x, y: x != y,
+        ">=": lambda x, y: x >= y,
+        ">": lambda x, y: x > y,
+    }
+    return operators[op](a, b)
+
+
+# ----------------------------
+# File Loading Functions
 # ----------------------------
 
 def load_json(path: str, source: Optional[str] = None) -> Dict[str, Any]:
@@ -34,315 +71,430 @@ def load_fasta(path: str):
     return screed.open(path)
 
 
-def z_score(value: float, mean: float, sd: float) -> Optional[float]:
-    # z-score is valid for any mean; only sd must be > 0
-    if sd and sd > 0:
-        return (value - mean) / sd
-    return None
+# ----------------------------
+# Data Parsing Functions
+# ----------------------------
 
-
-def genome_stats(records) -> Dict[str, Any]:
+def calculate_genome_stats(records) -> Dict[str, Any]:
     """
-    Stream through FASTA once; avoid building a giant string and avoid .get on screed records.
+    Stream through FASTA and calculate assembly statistics.
+    
+    Returns:
+        Dictionary with contig count, total length, and GC content
     """
     contigs = 0
-    length = 0
+    total_length = 0
     gc_count = 0
+    
     for rec in records:
         seq = rec.sequence.upper()
         contigs += 1
-        length += len(seq)
-        gc_count += (seq.count('G') + seq.count('C'))
-    gc = (100.0 * gc_count / length) if length > 0 else None
-    logging.info(f"Loaded FASTA with {contigs} contigs")
-    return {'denovo_contigs': contigs, 'denovo_length': length, 'denovo_gc': gc}
+        total_length += len(seq)
+        gc_count += seq.count('G') + seq.count('C')
+    
+    gc_content = (100.0 * gc_count / total_length) if total_length > 0 else None
+    
+    logging.info(f"Loaded FASTA with {contigs} contigs, {total_length:,} bp")
+    
+    return {
+        'denovo_contigs': contigs,
+        'denovo_length': total_length,
+        'denovo_gc': gc_content
+    }
 
 
-def taxid_stats(data: Dict[str, Any],
-                ncbi_stats: List[Dict[str, str]],
-                taxid: Any,
-                min_n: int) -> Dict[str, Any]:
+def calculate_taxid_stats(
+    data: Dict[str, Any],
+    ncbi_stats: List[Dict[str, str]],
+    taxid: Optional[str],
+    min_n: int
+) -> Dict[str, Any]:
     """
-    Attach z-scores for assembly length and GC if ncbi_stats has enough samples.
-    Prefer exact taxid match; fall back to case-insensitive name match.
+    Calculate z-scores for assembly metrics using NCBI reference stats.
+    
+    Matches by taxid if provided, otherwise by species name.
+    Only calculates z-scores if reference has sufficient samples (>= min_n).
     """
-    res: Dict[str, Any] = {}
+    result: Dict[str, Any] = {}
 
-    name = (data.get('species') or '').strip()
-    length = data.get('denovo_length', 0)
-    gc = data.get('denovo_gc', None)
-    if not length or gc is None:
-        return res
+    # Determine what to match on
+    target = taxid if taxid else data.get('species')
+    match_column = 'taxids' if taxid else 'names'
 
-    wanted_taxid = (str(taxid).strip() if taxid is not None else None)
-
+    target = normalize_value(target)
+    if not target:
+        return result
+            
+    # Find matching reference stats
     for rec in ncbi_stats:
-        rec_taxid = (str(rec.get('taxid') or '').strip() or None)
-        rec_name  = (rec.get('name') or '').strip()
+        rec_values = [ normalize_value(v) for v in rec.get(match_column, []) ]
+        
+        if target not in rec_values:
+            continue
+        
+        # Extract reference statistics
+        length_mean = float(rec.get("length_mean", 0))
+        length_sd = float(rec["length_stdev"]) if rec.get("length_stdev") is not None else None
+        gc_mean = float(rec.get("gc_mean", 0))
+        gc_sd = float(rec["gc_stdev"]) if rec.get("gc_stdev") is not None else None
+        n_samples = int(rec.get("n", 0))
 
-        taxid_match = bool(wanted_taxid and rec_taxid and rec_taxid == wanted_taxid)
-        name_match  = bool(name and rec_name and rec_name.lower() == name.lower())
-        if not (taxid_match or name_match):
+        # Estimate sequencing depth
+        total_bases = data.get('total_bases_after_filtering', 0)
+        if length_mean > 0:
+            result['estimated_depth'] = int(round(float(total_bases) / float(length_mean)))
+        else:
+            result['estimated_depth'] = 0
+
+        # Only calculate z-scores if sufficient reference samples
+        if n_samples < min_n:
+            logging.warning(f"Insufficient reference samples to calculate z-scores (n={n_samples}, min={min_n})")
+            return result
+    
+        # Calculate z-scores
+        if 'denovo_length' not in data:
             continue
 
-        length_mean = float(rec.get("length_mean") or 0)
-        length_sd   = float(rec.get("length_stdev") or 0)
-        gc_mean     = float(rec.get("gc_mean") or 0)
-        gc_sd       = float(rec.get("gc_stdev") or 0)
-        n           = int(float(rec.get("n") or 0))
+        assembly_length = float(data.get('denovo_length', 0))
+        assembly_gc = float(data.get('denovo_gc', 0))
+        
+        result['denovo_length_z'] = calculate_z_score(
+            assembly_length, length_mean, length_sd
+        )
+        result['denovo_gc_z'] = calculate_z_score(
+            assembly_gc, gc_mean, gc_sd
+        )
 
-        if n >= min_n:
-            res['denovo_length_z'] = z_score(float(length), length_mean, length_sd)
-            res['denovo_gc_z']     = z_score(float(gc), gc_mean, gc_sd)
+        logging.info(f"Calculated z-scores using {n_samples} reference genomes")
         break
 
-    return res
+    return result
 
 
 def parse_read_stats(stats_dict: Dict[str, Any]) -> Dict[str, Any]:
-    res: Dict[str, Any] = {}
-    for k, v in stats_dict.get('summary', {}).items():
-        if k not in ['before_filtering', 'after_filtering']:
-            continue
-        for k2, v2 in v.items():
-            res[f"{k2}_{k}"] = v2
-    return res
+    """Extract read statistics from fastp summary."""
+    result: Dict[str, Any] = {}
+    
+    summary = stats_dict.get('summary', {})
+    for stage in ['before_filtering', 'after_filtering']:
+        if stage in summary:
+            for key, value in summary[stage].items():
+                result[f"{key}_{stage}"] = value
+    
+    return result
 
 
-def parse_species(species_dict: Dict[str, str]):
-    name = species_dict.get('predicted.name')
+def parse_species(species_dict: Dict[str, str]) -> tuple[Dict[str, Any], Optional[str]]:
+    """Extract species identification from GAMBIT output."""
+    species_name = species_dict.get('predicted.name')
     rank = species_dict.get('predicted.rank')
     taxid = species_dict.get('predicted.ncbi_id')
 
-    conf = 'high' if rank == 'species' else 'low'
+    # Fall back to next best match if prediction unavailable
+    if not species_name:
+        species_name = species_dict.get('next.name')
 
-    if not name:
-        name = species_dict.get('next.name')
-
-    res = {'species': name, 'species_confidence': conf}
-    return res, taxid
+    result = {'species': species_name}
+    return result, taxid
 
 
 def parse_subtype(subtype_dict: Dict[str, str]) -> Dict[str, Any]:
-    name = subtype_dict.get('subtype')
-    conf = subtype_dict.get('closest_ani')
-    if name:
-        name = name.split('-', 1)[0]
-    return {'subtype': name, 'subtype_ani': conf}
+    """Extract subtype information from subtyping results."""
+    subtype_name = subtype_dict.get('subtype')
+    confidence = subtype_dict.get('closest_ani')
+    
+    # Extract base subtype (remove suffix after hyphen)
+    if subtype_name:
+        subtype_name = subtype_name.split('-', 1)[0]
+    
+    return {
+        'subtype': subtype_name,
+        'subtype_ani': confidence
+    }
 
 
-def auto_qc(data: Dict[str, Any],
-            min_depth: int,
-            min_qual: float,
-            max_z: float) -> Dict[str, Any]:
-
-    qc_status = 'PASS'
-    qc_reason: List[str] = []
-
-    # Require only the essentials; z-scores are optional below
-    req_cols = ['species', 'subtype', 'denovo_depth', 'q30_rate_after_filtering']
-    for col in req_cols:
-        if col not in data:
-            return data | {'qc_status': 'UNKNOWN',
-                           'qc_reason': [f'{col} not determined']}
-
-    # Quality checks
-    try:
-        if float(data['q30_rate_after_filtering']) < float(min_qual):
-            qc_status = 'FAIL'
-            qc_reason.append(f'Q30 Rate < {min_qual}')
-    except (TypeError, ValueError):
-        qc_status = 'UNKNOWN'
-        qc_reason.append('Invalid Q30 rate')
-
-    try:
-        if int(float(data['denovo_depth'])) < int(min_depth):
-            qc_status = 'FAIL'
-            qc_reason.append(f'Assembly Depth < {min_depth}')
-    except (TypeError, ValueError):
-        qc_status = 'UNKNOWN'
-        qc_reason.append('Invalid assembly depth')
-
-    # Optional z-score checks
-    for key, label in [('denovo_length_z', 'Unusual assembly length'),
-                       ('denovo_gc_z', 'Unusual GC content')]:
-        val = data.get(key)
-        try:
-            if val is not None and abs(float(val)) >= float(max_z):
-                qc_status = 'FAIL'
-                qc_reason.append(label)
-        except (TypeError, ValueError):
-            qc_status = 'UNKNOWN'
-            qc_reason.append(f'Invalid {key}')
-
-    return data | {'qc_status': qc_status, 'qc_reason': qc_reason}
-
-
-def parse_samplesheet(data: List[Dict[str, str]], sample: str) -> Dict[str, Any]:
-    found = False
-    out: Dict[str, Any] = {}
-    for rec in data:
-        rec_name = rec.get('sample')
-        if not rec_name or rec_name != sample:
-            continue
-        found = True
-        if rec.get('species'):
-            out |= {'species': rec['species'], 'species_confidence': 'Manual'}
-        if rec.get('subtype'):
-            out |= {'subtype': rec['subtype']}
-        if rec.get('reference'):
-            out |= {'reference': rec['reference'], 'reference_source': 'Manual'}
-    if not found:
-        logging.warning(f"{sample} not found in samplesheet!")
-    elif out:
-        logging.info(f"Using values from samplesheet: {list(out.keys())}")
-    else:
-        logging.info(f"No relevant values found in samplesheet for {sample}")
-    return out
+def parse_samplesheet(
+    samplesheet_data: List[Dict[str, str]],
+    sample_name: str
+) -> Dict[str, Any]:
+    """Extract sample-specific data from samplesheet."""
+    for record in samplesheet_data:
+        if record.get('sample') == sample_name:
+            logging.info(f"Found sample in samplesheet: {list(record.keys())}")
+            return record
+    
+    logging.warning(f"Sample '{sample_name}' not found in samplesheet")
+    return {}
 
 
 # ----------------------------
-# Main
+# QC Functions
+# ----------------------------
+
+def perform_auto_qc(
+    data: Dict[str, Any],
+    min_depth: int,
+    min_qual: float,
+    max_z: float
+) -> Dict[str, Any]:
+    """
+    Perform automated quality control checks.
+    
+    Checks:
+    - Species identified
+    - Subtype identified
+    - Q30 rate >= threshold
+    - Read depth >= threshold
+    - Assembly length z-score < threshold (if available)
+    - GC content z-score < threshold (if available)
+    """
+    qc_status = 'PASS'
+    qc_und: List[str] = []
+    qc_fail: List[str] = []
+    qc_error: List[str] = []
+
+
+    # Define QC criteria (field: (operator, threshold) or None for required)
+    qc_criteria = {
+        'q30_rate_after_filtering': ('>=', min_qual),
+        'species': None,
+        'subtype': None,
+        'estimated_depth': ('>=', min_depth),
+        'denovo_length_z': ('<', max_z),
+        'denovo_gc_z': ('<', max_z)
+    }
+    
+    for field, criterion in qc_criteria.items():
+        value = data.get(field)
+
+        # Check if field exists
+        if value is None:
+            qc_und.append(field)
+            if field.startswith('denovo'):
+                continue
+            qc_status = 'FAIL'
+            break
+
+        # If no criterion specified, just check for presence
+        if criterion is None:
+            continue
+
+        # Compare against threshold
+        try:
+            operator, threshold = criterion
+            
+            # For z-scores, check absolute value
+            if field.endswith('_z'):
+                value = abs(value)
+            
+            if not compare_values(value, operator, threshold):
+                qc_status = 'FAIL'
+                qc_fail.append(f"{field} {operator} {threshold}")
+        except Exception as e:
+            qc_status = 'FAIL'
+            qc_error.append(field)
+            logging.error(f"QC comparison failed for {field}: {e}")
+    
+    qc_reasons = [ 
+        f"Undetermined: {', '.join(qc_und)}" if qc_und else '', 
+        f"Failure: {', '.join(qc_fail)}" if qc_fail else '', 
+        f"Error: {', '.join(qc_error)}" if qc_error else ''
+    ]
+
+    data['qc_status'] = qc_status
+    data['qc_reason'] = '; '.join([r for r in qc_reasons if r])
+    
+    logging.info(f"QC Status: {data['qc_status']}")
+    if qc_reasons:
+        logging.info(f"QC Reasons: {data['qc_reason']}")
+    
+    return data
+
+
+# ----------------------------
+# Main Function
 # ----------------------------
 
 def main():
-    version = "1.0"
+    """Main workflow summarization function."""
+    VERSION = "1.1"
 
     parser = argparse.ArgumentParser(
-        description="Summarize outputs from various workflows"
+        description="Summarize outputs from bioinformatics workflows",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--sample", required=True, help="Sample name")
-    parser.add_argument("--samplesheet", required=True, help="Samplesheet path")
-    parser.add_argument("--ncbi_stats", default=None, help="NCBI stats file.")
-    parser.add_argument("--read_stats", help="Fastp summary output (JSON)")
-    parser.add_argument("--species", help="GAMBIT summary output (CSV)")
-    parser.add_argument("--subtype", help="subtyper.py summary output (CSV)")
-    parser.add_argument("--denovo", help="De novo assembly (FASTA)")
-    parser.add_argument("--min_ncbi_stats_n", type=int, default=10,
-                        help="Minimum N in NCBI stats for z-scores")
+    
+    # Required arguments
+    parser.add_argument("--sample", required=True,
+                        help="Sample name")
+    parser.add_argument("--samplesheet", required=True,
+                        help="Samplesheet CSV path")
+    
+    # Optional input files
+    parser.add_argument("--ncbi_stats",
+                        help="NCBI reference statistics CSV")
+    parser.add_argument("--read_stats",
+                        help="Fastp summary output (JSON)")
+    parser.add_argument("--species",
+                        help="GAMBIT species identification output (CSV)")
+    parser.add_argument("--subtype",
+                        help="Subtype identification output (CSV)")
+    parser.add_argument("--denovo",
+                        help="De novo assembly (FASTA)")
+    
+    # QC parameters
+    parser.add_argument("--min_ncbi_stats_n", type=int, default=3,
+                        help="Minimum samples in NCBI stats for z-score calculation")
     parser.add_argument("--min_depth", type=int, default=20,
-                        help="Minimum read depth for auto QC")
+                        help="Minimum read depth for QC pass")
     parser.add_argument("--min_qual", type=float, default=0.8,
-                        help="Minimum Q30 rate after filtering for auto QC")
+                        help="Minimum Q30 rate for QC pass")
     parser.add_argument("--max_z_score", type=float, default=2.58,
-                        help="Maximum absolute z-score for auto QC")
+                        help="Maximum absolute z-score for QC pass")
+    
+    # Logging options
     parser.add_argument("--log-level",
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                        default='INFO', help="Logging level")
+                        default='INFO',
+                        help="Logging verbosity level")
+    parser.add_argument("--log-file",
+                        help="Optional log file path")
+    
     parser.add_argument("--version", action="version",
-                        version=version, help="Show script version and exit.")
-    parser.add_argument("--log-file", help="Log file path (optional)")
+                        version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args()
 
-    # configure logging
+    # Configure logging
     logging.basicConfig(
         filename=args.log_file,
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
+    logging.info(f"Starting workflow summary for sample: {args.sample}")
+
+    # Initialize result dictionary
     data: Dict[str, Any] = {'sample': args.sample}
 
-    # Samplesheet (manual overrides)
+    # Parse samplesheet (for manual overrides)
     samplesheet_data = load_csv(args.samplesheet, 'samplesheet')
-    data |= parse_samplesheet(samplesheet_data, args.sample)
+    data.update(parse_samplesheet(samplesheet_data, args.sample))
 
-    # Species
-    species_cols = ['species', 'species_confidence']
+    # Parse species identification
     taxid: Optional[str] = None
-    if not all(c in data for c in species_cols):
-        if args.species:
-            species_data = load_csv(args.species, 'species')
-            if species_data:
-                species_parsed, taxid = parse_species(species_data[0])
-                data |= species_parsed
-                species_cols = list(species_parsed.keys())
-            else:
-                logging.warning("Species CSV is empty")
+    if data.get('species'):
+        logging.info("Using user-supplied species from samplesheet")
+    elif args.species:
+        logging.info("Extracting species identification")
+        species_data = load_csv(args.species, 'species')
+        if species_data:
+            species_parsed, taxid = parse_species(species_data[0])
+            data.update(species_parsed)
         else:
-            logging.warning("No species data provided")
+            logging.warning("Species CSV is empty")
+    else:
+        logging.warning("No species data provided")
 
-    # Subtype
-    subtype_cols = ['subtype']
-    if not all(c in data for c in subtype_cols):
-        if args.subtype:
-            subtype_data = load_csv(args.subtype, 'subtype')
-            if subtype_data:
-                subtype_parsed = parse_subtype(subtype_data[0])
-                data |= subtype_parsed
-                subtype_cols = list(subtype_parsed.keys())
-            else:
-                logging.warning("Subtype CSV is empty")
+    # Parse subtype
+    if data.get('subtype'):
+        logging.info("Using user-supplied subtype from samplesheet")
+    elif args.subtype:
+        logging.info("Extracting subtype information")
+        subtype_data = load_csv(args.subtype, 'subtype')
+        if subtype_data:
+            subtype_parsed = parse_subtype(subtype_data[0])
+            data.update(subtype_parsed)
         else:
-            logging.warning("No subtype data provided")
+            logging.warning("Subtype CSV is empty")
+    else:
+        logging.warning("No subtype data provided")
 
-    # De novo / assembly stats
-    denovo_cols: List[str] = []
+    # Parse assembly statistics
     if args.denovo:
+        logging.info("Calculating genome statistics from assembly")
         with load_fasta(args.denovo) as fasta_records:
-            genome_stats_data = genome_stats(fasta_records)
-        data |= genome_stats_data
-        denovo_cols = list(genome_stats_data.keys())
+            genome_stats_data = calculate_genome_stats(fasta_records)
+        data.update(genome_stats_data)
     else:
         logging.warning("No assembly data provided")
 
-    # Read stats
-    read_cols: List[str] = []
+    # Parse read statistics
     if args.read_stats:
+        logging.info("Extracting read statistics")
         stats = load_json(args.read_stats, 'read_stats')
         stats_parsed = parse_read_stats(stats)
-        data |= stats_parsed
-        read_cols = list(stats_parsed.keys())
+        data.update(stats_parsed)
     else:
-        logging.warning("No read stats data provided")
+        logging.warning("No read statistics provided")
 
-    # Depth estimate
-    depth_col: List[str] = []
-    bases = data.get('total_bases_after_filtering', 0)  # from fastp
-    length = data.get('denovo_length', 0)
-    if bases and length:
-        try:
-            b = float(bases)
-            L = float(length)
-            data['denovo_depth'] = int(round(b / L)) if L > 0 else 0
-            depth_col = ['denovo_depth']
-        except (TypeError, ValueError):
-            logging.warning("Could not compute read depth due to invalid values")
+    # Calculate z-scores using NCBI reference data
+    if args.ncbi_stats:
+        logging.info("Calculating z-scores from NCBI reference statistics")
+        ncbi_stats_data = load_json(args.ncbi_stats, 'ncbi_stats')
+        taxid_stats_data = calculate_taxid_stats(
+            data, ncbi_stats_data, taxid, args.min_ncbi_stats_n
+        )
+        if taxid_stats_data:
+            data.update(taxid_stats_data)
+        else:
+            logging.warning("Could not calculate NCBI-based statistics")
     else:
-        logging.warning("Read depth not estimated")
+        logging.warning("NCBI reference statistics not provided")
 
-    # Taxid z-scores
-    taxid_cols: List[str] = []
-    if all(c in data for c in ['denovo_length', 'denovo_gc']) and args.ncbi_stats:
-        ncbi_stats_data = load_csv(args.ncbi_stats, 'ncbi_stats')
-        taxid_stats_data = taxid_stats(data, ncbi_stats_data, taxid, args.min_ncbi_stats_n)
-        data |= taxid_stats_data
-        taxid_cols = list(taxid_stats_data.keys())
-    else:
-        logging.warning("Z-scores not calculated for assembly length and GC")
+    # Perform automated QC
+    data = perform_auto_qc(data, args.min_depth, args.min_qual, args.max_z_score)
 
-    # Auto QC (z-scores are optional; included if present)
-    data = auto_qc(data, args.min_depth, args.min_qual, args.max_z_score)
+    # Format output values
+    for key, value in list(data.items()):
+        # Convert lists to semicolon-delimited strings
+        if isinstance(value, list):
+            data[key] = ';'.join(map(str, value))
+        # Round floats (except depth fields which should be integers)
+        elif isinstance(value, float) and not key.endswith('_depth'):
+            data[key] = round(value, 2)
 
-    # Normalize values
-    for k, v in list(data.items()):
-        # list values to semicolon-joined strings (e.g., qc_reason)
-        if isinstance(v, list):
-            data[k] = ';'.join(map(str, v))
-        # round floats but keep depth as int
-        elif isinstance(v, float) and not k.endswith('_depth'):
-            data[k] = round(v, 2)
+    # Define output column order
+    output_columns = [
+        'sample',
+        'qc_status',
+        'qc_reason',
+        'species',
+        'subtype',
+        'subtype_ani',
+        'estimated_depth',
+        'denovo_contigs',
+        'denovo_length',
+        'denovo_length_z',
+        'denovo_gc',
+        'denovo_gc_z',
+        'total_reads_after_filtering',
+        'total_bases_after_filtering',
+        'q30_bases_after_filtering',
+        'q30_rate_after_filtering',
+        'read1_mean_length_after_filtering',
+        'read2_mean_length_after_filtering',
+        'gc_content_after_filtering',
+        'total_reads_before_filtering',
+        'total_bases_before_filtering',
+        'q30_bases_before_filtering',
+        'q30_rate_before_filtering',
+        'read1_mean_length_before_filtering',
+        'read2_mean_length_before_filtering',
+        'gc_content_before_filtering',
+    ]
+    
+    # Filter data to only include specified columns (in order)
+    filtered_data = {col: data.get(col, '') for col in output_columns}
 
-    # Output
-    header_order = (['sample', 'qc_status', 'qc_reason']
-                    + species_cols + subtype_cols
-                    + denovo_cols + depth_col + taxid_cols + read_cols)
-    data = {col: data.get(col) for col in header_order}
-    with open(f"{args.sample}-summary.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(data.keys()))
+    # Write output CSV
+    output_file = f"{args.sample}-summary.csv"
+    with open(output_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=output_columns)
         writer.writeheader()
-        writer.writerow(data)
+        writer.writerow(filtered_data)
+
+    logging.info(f"Summary written to: {output_file}")
 
 
 if __name__ == '__main__':
