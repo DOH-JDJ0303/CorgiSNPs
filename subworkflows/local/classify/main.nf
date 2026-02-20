@@ -9,7 +9,7 @@ import Utils
     IMPORT FUNCTIONS / MODULES / SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { SHOVILL      } from '../../../modules/nf-core/shovill/main'
+include { SHOVILL      } from '../../../modules/local/shovill/main'
 include { GAMBIT_QUERY } from '../../../modules/local/gambit/main'
 include { SUBTYPE      } from '../../../modules/local/subtype/main'
 
