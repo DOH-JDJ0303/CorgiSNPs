@@ -103,7 +103,7 @@
                 },
                 "shovill_depth": {
                     "type": "integer",
-                    "default": 30,
+                    "default": 70,
                     "description": "Target depth for shovill downsampling."
                 },
                 "genome_size": {
@@ -113,7 +113,7 @@
                 },
                 "min_contig_cov": {
                     "type": "integer",
-                    "default": 1,
+                    "default": 10,
                     "description": "Minimum contig coverage to retain."
                 },
                 "min_contig_len": {
