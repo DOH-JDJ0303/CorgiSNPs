@@ -50,12 +50,11 @@ workflow CORGISNPS {
     )
     ch_versions       = ch_versions.mix(PREPARE.out.versions)
     ch_multiqc_files  = ch_multiqc_files.mix(PREPARE.out.multiqc_files)
-    PREPARE.out.reads     .set{ ch_reads }
-    PREPARE.out.meta      .set{ ch_meta  }
-    PREPARE.out.read_stats.set{ ch_read_stats }
+    ch_samplesheet    = PREPARE.out.samplesheet
+    ch_read_stats     = PREPARE.out.read_stats
 
     // Initialize empty downstream channels.
-    ch_blank     = ch_reads.map{ [ it[0], [] ] }
+    ch_blank     = ch_samplesheet.map{ [ it[0], [] ] }
     ch_denovo    = ch_blank
     ch_species   = ch_blank
     ch_subtype   = ch_blank
@@ -70,32 +69,27 @@ workflow CORGISNPS {
     // ---------------------------
     if (params.classify) {
 
-        // Branch meta tuples into those needing classification and those already classified.
-        // classify    : items where either species (sp) or subtype (sb) is missing
-        // no_classify : items with both sp and sb present
-        ch_meta
-            .branch { meta, sp, sb, ref ->
-                classify   : !(sp && sb)
-                no_classify:  (sp && sb)
-            }
-            .set { ch_meta_branch }
-
         CLASSIFY(
-            // Join reads with only the meta needing classification (by matching meta key)
-            ch_reads.join( ch_meta_branch.classify.map{ [ it[0] ] } ),
-            ch_meta_branch.classify
+            ch_samplesheet
+                .filter{ meta, reads ->
+                    !(meta.species && meta.subtype)
+                }
         )
         ch_versions = ch_versions.mix(CLASSIFY.out.versions)
 
         // Merge back classified meta with pass-through meta
-        CLASSIFY.out.meta.concat(ch_meta_branch.no_classify).set{ ch_meta }
-        CLASSIFY.out.denovo  .set{ ch_denovo }
-        CLASSIFY.out.species .set{ ch_species }
-        CLASSIFY.out.subtype .set{ ch_subtype }
+        ch_samplesheet = CLASSIFY.out.samplesheet.concat(ch_samplesheet.filter{ meta, reads -> (meta.species && meta.subtype) })
+        ch_denovo      = CLASSIFY.out.denovo
+        ch_species     = CLASSIFY.out.species
+        ch_subtype     = CLASSIFY.out.subtype
     }
 
     // Sanitize species/subtype strings in-flight
-    ch_meta.map { meta, sp, sb, ref -> [ meta, Utils.sanitize(sp), Utils.sanitize(sb), ref ] }.set{ch_meta}
+    ch_samplesheet = ch_samplesheet
+        .map { meta, reads -> 
+            def new_meta = meta + [species: Utils.sanitize(meta.species), subtype: Utils.sanitize(meta.subtype)]
+            [ new_meta, reads ] 
+        }
 
 
     // -------------------------------------------------------------------------
@@ -103,12 +97,13 @@ workflow CORGISNPS {
     // Joins preserve samples lacking some inputs via 'remainder: true';
     // missing items are replaced with [] to keep tuple shapes consistent.
     // -------------------------------------------------------------------------
-    ch_meta.map{meta, sp, sb, ref -> [meta]}
-        .join(ch_read_stats, remainder: true)
-        .join(ch_denovo,     remainder: true)
-        .join(ch_species,    remainder: true)
-        .join(ch_subtype,    remainder: true)
-        .map { it.collect { k -> k ? k : [] } }
+    ch_samplesheet
+        .map{meta, reads -> [meta.id, meta]}
+        .join(ch_read_stats.map{ meta, file -> [meta.id, file] }, remainder: true)
+        .join(ch_denovo.map{ meta, file -> [meta.id, file] },     remainder: true)
+        .join(ch_species.map{ meta, file -> [meta.id, file] },    remainder: true)
+        .join(ch_subtype.map{ meta, file -> [meta.id, file] },    remainder: true)
+        .map { it.collect { k -> k ? k : [] }.drop(1) }
         .set { ch_samples }
 
     // -------------------------------------------------------------------------
@@ -121,75 +116,93 @@ workflow CORGISNPS {
     )
     ch_versions = ch_versions.mix(SUMMARYLINE.out.versions.first())
 
-    SUMMARYLINE
+    ch_auto_qc = SUMMARYLINE
         .out
         .summary
         .splitCsv(header: true)
-        .map{ meta, data -> [meta, params.auto_qc ? (data.containsKey('qc_status') ? data['qc_status'] == 'PASS' : false) : true ] }
+        .map{ meta, data -> [meta, params.ignore_qc ? true : (data.containsKey('qc_status') ? data['qc_status'] == 'PASS' : false) ] } // option to ignore auto QC here
         .branch{ meta, status ->
             pass: status
             not_pass: !status }
-        .set{ch_auto_qc}
 
-    ch_reads.join(ch_auto_qc.pass.map{it[0]}).set{ch_reads_pass}
-    ch_meta.join(ch_auto_qc.pass.map{it[0]}).set{ch_meta_pass}
+    ch_samplesheet_pass = ch_samplesheet
+        .join(
+            ch_auto_qc.pass.map{meta, status -> [meta]}
+        )
 
-    SUMMARYLINE.out.summary.join(ch_auto_qc.pass.map{it[0]}).set{ch_summary_pass}
-    SUMMARYLINE.out.summary.join(ch_auto_qc.not_pass.map{it[0]}).set{ch_summary_not_pass}
+    ch_summary_pass = SUMMARYLINE
+        .out
+        .summary
+        .join(
+            ch_auto_qc.pass.map{meta, status -> [meta]}
+        )
+    ch_summary_fail = SUMMARYLINE
+        .out
+        .summary
+        .join(
+            ch_auto_qc.not_pass.map{meta, status -> [meta]}
+        )
+
     // ---------------------------
     // VARIANTS / AMR / PHYLO (optional)
     // ---------------------------
     if (params.variants) {
         VARIANTS(
-            ch_reads_pass,
-            ch_meta_pass,
+            ch_samplesheet_pass,
             true
         )
-        ch_versions = ch_versions.mix(VARIANTS.out.versions)
-        VARIANTS.out.meta .set{ ch_meta_pass }
-        VARIANTS.out.depth.set{ ch_depth }
+        ch_versions         = ch_versions.mix(VARIANTS.out.versions)
+        ch_samplesheet_pass = VARIANTS.out.samplesheet
+        ch_depth            = VARIANTS.out.depth
+        ch_bam              = VARIANTS.out.bam
+        ch_vcf              = VARIANTS.out.vcf
+        ch_aln              = VARIANTS.out.aln
 
         if(params.amr){
             AMR(
-                VARIANTS.out.meta,
-                VARIANTS.out.bam,
-                VARIANTS.out.vcf
+                ch_samplesheet_pass,
+                ch_bam,
+                ch_vcf
             )
             ch_versions = ch_versions.mix(AMR.out.versions)
             
-            ch_summary_pass
+            ch_summary_pass_amr = ch_summary_pass
                 .join(AMR.out.summary, remainder: true)
                 .branch{ meta, summaryline, amr_summary -> 
-                    db_exists: amr_summary
-                    db_miss: !amr_summary  }
-                .set{ ch_summary_pass_amr }
+                    pass: amr_summary
+                    not_pass: !amr_summary  }
 
             ADD_AMR(
-                ch_summary_pass_amr.db_exists
+                ch_summary_pass_amr.pass
             )
-            ch_versions = ch_versions.mix(ADD_AMR.out.versions)
-            ADD_AMR.out.summary
-                .concat(ch_summary_pass_amr.db_miss.map{[it[0],it[1]]})
-                .set{ ch_summary_pass }
+            ch_versions     = ch_versions.mix(ADD_AMR.out.versions)
+            ch_summary_pass = ADD_AMR
+                .out
+                .summary
+                .concat(
+                    ch_summary_pass_amr
+                        .not_pass
+                        .map{[it[0], it[1]]}
+                )
         }
         if(params.phylo){
             PHYLO(
-                VARIANTS.out.aln,
-                ch_meta_pass
+                ch_aln,
+                ch_samplesheet_pass
             )
-            ch_versions = ch_versions.mix(PHYLO.out.versions)
-            PHYLO.out.aln_stats.set{ ch_aln_stats }
-            PHYLO.out.tree     .set{ ch_tree }
-            PHYLO.out.dist     .set{ ch_dist }
+            ch_versions  = ch_versions.mix(PHYLO.out.versions)
+            ch_aln_stats = PHYLO.out.aln_stats
+            ch_tree      = PHYLO.out.tree
+            ch_dist      = PHYLO.out.dist
         }
     }
     
     REPORT_ALL(
-        ch_summary_pass.concat(ch_summary_not_pass).map{meta, summaryline -> summaryline}.collect()
+        ch_summary_pass.concat(ch_summary_fail).map{meta, summaryline -> summaryline}.collect()
     )
 
     if(params.phylo){
-        REPORT_SPECIES(
+        REPORT_SPECIES (
             ch_aln_stats
                 .join(ch_tree, by: [0,1])
                 .join(ch_dist, by: [0,1])

@@ -6,9 +6,8 @@ process EXTRACT_REGIONS {
     tuple val(meta), path(bam), path(ref), path(genome), path(genes)
 
     output:
-    tuple val(meta), path("*.fastq.gz"),             emit: reads , optional:true
-    tuple val(meta), path("genome_masked.fasta.gz"), emit: ref
-    path "versions.yml",                             emit: versions
+    tuple val(meta), path("*.fastq.gz"), path("genome_masked.fasta.gz"), emit: results
+    path "versions.yml",                                                 emit: versions
     
     when:
     task.ext.when == null || task.ext.when

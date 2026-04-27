@@ -5,7 +5,7 @@ process SNPEFF {
     container 'docker.io/staphb/snpeff:5.2f'
 
     input:
-    tuple val(meta), path(vcf), path(tbi), val(species)
+    tuple val(meta), path(vcf), path(tbi)
     path snpeff_db, stageAs: 'snpEff'
 
     output:
@@ -27,7 +27,7 @@ process SNPEFF {
     """
     snpEff \\
         -Xmx${avail_mem}M \\
-        ${species} \\
+        ${meta.species} \\
         -c "${snpeff_db}/snpEff.config" \\
         -csvStats ${prefix}.csv \\
         $args \\

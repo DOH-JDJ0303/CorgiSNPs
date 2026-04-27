@@ -31,22 +31,13 @@ workflow PREPARE {
     ch_multiqc_files = Channel.empty()
 
     // -------------------------------------------------------------------------
-    // Branch: separate SRA vs non-SRA rows from samplesheet
-    // Produces ch_sra_branch.sra_true and ch_sra_branch.sra_false
-    // -------------------------------------------------------------------------
-    ch_samplesheet
-        .branch { meta, reads, sp, sb, ref, sra ->
-            sra_true :  sra
-            sra_false: !sra
-        }
-        .set { ch_sra_branch }
-
-    // -------------------------------------------------------------------------
     // MODULE: Download reads from SRA for sra_true rows
     // Input reshaped to [ meta, sra ]
     // -------------------------------------------------------------------------
     FASTERQDUMP(
-        ch_sra_branch.sra_true.map { meta, reads, sp, sb, ref, sra -> [ meta, sra ] }
+        ch_samplesheet
+            .filter{ it.meta.sra }
+            .map { it -> [ it.meta, it.meta.sra ] }
     )
     ch_versions = ch_versions.mix(FASTERQDUMP.out.versions)
 
@@ -55,17 +46,21 @@ workflow PREPARE {
     // Ensure meta.single_end is set based on number of read files
     // Output ch_samplesheet retains shape: [ meta, reads, sp, sb, ref ]
     // -------------------------------------------------------------------------
-    ch_sra_branch
-        .sra_true
-        .join(FASTERQDUMP.out.reads, by: 0)
-        .map   { meta, empty_reads, sp, sb, ref, sra, reads -> [ meta, reads, sp, sb, ref ] }
-        .concat( ch_sra_branch.sra_false.map { meta, reads, sp, sb, ref, sra -> [ meta, reads, sp, sb, ref ] } )
-        .map { meta, reads, sp, sb, ref -> [ [id: meta.id, single_end: (reads.size() == 1)], reads, sp, sb, ref ]}
+    FASTERQDUMP
+        .out
+        .reads
+        .map{ meta, reads -> 
+            def new_meta = meta + [single_end: reads.size() == 1]
+            [meta: new_meta, reads: reads] 
+        }
+        .concat( 
+            ch_samplesheet.filter{ ! it.meta.sra }
+        )
+        .map{ it ->
+            def new_meta = it.meta.findAll{ k, v -> k != 'sra' }
+            return it + [meta: new_meta]
+         }
         .set { ch_samplesheet }
-
-    // Split into read and meta streams for downstream modules
-    ch_samplesheet.map { meta, reads, sp, sb, ref -> [ meta, reads ] }.set { ch_reads }
-    ch_samplesheet.map { meta, reads, sp, sb, ref -> [ meta, sp, sb, ref ] }.set { ch_meta }
 
     // -------------------------------------------------------------------------
     // MODULE: Downsample reads with seqtk sample (if --max_reads provided)
@@ -74,35 +69,40 @@ workflow PREPARE {
     if (params.max_reads) {
 
         // Compute total read count (approx) by counting first R1 and doubling (paired)
-        ch_reads
-            .map { meta, reads -> [ meta, reads, reads[0].countFastq() * (meta.single_end ? 1 : 2) ] }
-            .branch { meta, reads, n ->
+        ch_samplesheet
+            .map { it -> [it, it.reads[0].countFastq() * (it.meta.single_end ? 1 : 2) ] }
+            .branch { it, n ->
                 ok  : n <= params.max_reads
                 high: n >  params.max_reads
             }
-            .set { ch_reads }
+            .set { ch_samplesheet }
 
         // For high-coverage samples, sample each mate independently
         SEQTK_SAMPLE(
-            ch_reads
+            ch_samplesheet
                 .high
-                .transpose()                                  // [ meta, read, n ]
-                .map { meta, read, n -> [ meta, read, params.max_reads ] }
+                .map{ it, n -> [it.meta, it.reads, params.max_reads] }
+                .transpose()
         )
         ch_versions = ch_versions.mix(SEQTK_SAMPLE.out.versions)
 
         // Re-assemble paired reads and merge with ok set
-        SEQTK_SAMPLE.out.read
-            .groupTuple(by: 0)                                 // -> [ meta, [paths...] ]
-            .concat( ch_reads.ok.map { meta, reads, n -> [ meta, reads ] } )
-            .set { ch_reads }
+        SEQTK_SAMPLE
+            .out
+            .read
+            .groupTuple(by: 0)
+            .map{ meta, reads -> [meta: meta, reads: reads] }                            // -> [ meta, [paths...] ]
+            .concat( ch_samplesheet.ok.map { it, n -> it } )
+            .set { ch_samplesheet }
     }
+
+    ch_samplesheet = ch_samplesheet.map{ [it.meta, it.reads] }
 
     // -------------------------------------------------------------------------
     // MODULE: FastQC (adds zips to MultiQC input and versions to collector)
     // -------------------------------------------------------------------------
     FASTQC(
-        ch_reads
+        ch_samplesheet
     )
     ch_multiqc_files = ch_multiqc_files.mix( FASTQC.out.zip.collect { it[1] } )
     ch_versions      = ch_versions     .mix( FASTQC.out.versions.first() )
@@ -111,18 +111,17 @@ workflow PREPARE {
     // MODULE: Fastp (trimming/filters + JSON stats). Replace reads with trimmed.
     // -------------------------------------------------------------------------
     FASTP(
-        ch_reads,
+        ch_samplesheet,
         [],
         false,
         false,
         false
     )
-    ch_versions = ch_versions.mix(FASTP.out.versions.first())
-    FASTP.out.reads.set { ch_reads }
+    ch_versions    = ch_versions.mix(FASTP.out.versions.first())
+    ch_samplesheet = FASTP.out.reads
 
     emit:
-    meta          = ch_meta
-    reads         = ch_reads
+    samplesheet   = ch_samplesheet
     read_stats    = FASTP.out.json
     versions      = ch_versions
     multiqc_files = ch_multiqc_files

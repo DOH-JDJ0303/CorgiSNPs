@@ -67,25 +67,19 @@ workflow PIPELINE_INITIALISATION {
     // Create channel from input file provided through params.input
     //
 
-    Channel
+    channel
         .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-        .map {
-            meta, fastq_1, fastq_2, species, subtype, reference, sra ->
-                if (!fastq_2) {
-                    return [ meta + [ single_end:true ], [ fastq_1 ], species, subtype, reference, sra ]
-                } else {
-                    return [ meta + [ single_end:false ], [ fastq_1, fastq_2 ], species, subtype, reference, sra ]
-                }
-        }
-        // .groupTuple()
-        // .map { samplesheet ->
-        //     validateInputSamplesheet(samplesheet)
-        // }
-        // .map {
-        //     meta, fastqs, species, subtype, reference ->
-        //         return [ meta, fastqs.flatten(), species.flatten(), subtype.flatten(), reference.flatten() ]
-        // }
+        .map { create_sample_channel(it) }
         .set { ch_samplesheet }
+
+    ch_samplesheet
+        .map{ it.meta.id }
+        .collect()
+        .subscribe{ it -> 
+            if (it.countBy{ id -> id }.any{ id -> id.value > 1 }){
+                exit 1, "No duplicate sample names allowed!"
+            }
+        }
 
     emit:
     samplesheet = ch_samplesheet
@@ -146,20 +140,35 @@ workflow PIPELINE_COMPLETION {
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-//
-// Validate channels from input samplesheet
-//
-def validateInputSamplesheet(input) {
-    def (metas, fastqs) = input[1..2]
+// Function to prepare the samplesheet
+def create_sample_channel(row) {
+    def (
+        sample, fastq_1, fastq_2, species, subtype, reference, ploidy, sra
+    ) = row
 
-    // Check that multiple runs of the same sample are of the same datatype i.e. single-end / paired-end
-    def endedness_ok = metas.collect{ meta -> meta.single_end }.unique().size == 1
-    if (!endedness_ok) {
-        error("Please check input samplesheet -> Multiple runs of a sample must be of the same datatype i.e. single-end or paired-end: ${metas[0].id}")
+    // ===================================================
+    //    Reads
+    // ===================================================
+    // Check that at least one read type was provided
+    if( ! (fastq_1 && fastq_2) && ! sra ){ exit 1, "ERROR: Reads must be provided via the 'fastq_1' and 'fastq_2', or 'sra' columns for ${sample}." }
+    // Check that multiple read options were not provided
+    if( ((fastq_1 && fastq_2) && sra) ){ exit 1, "ERROR: Multiple read inputs provided - either fastq_1 & fastq_2 or sra" }
+
+    // ===================================================
+    //    Reference
+    // ===================================================
+    if( reference && ! ploidy ){
+        exit 1, "ERROR: Ploidy must be specified when supplying a reference in the samplesheet."
     }
-
-    return [ metas[0], fastqs ]
+    //// Build output
+    out = [ 
+        meta: sample + ['single_end': fastq_2 ? false : true, 'species': species, 'subtype': subtype, 'ploidy': ploidy, 'reference': reference, 'sra': sra ],
+        reads: fastq_2 ? [ fastq_1, fastq_2 ] : [fastq_1]
+    ]
+    
+    return out
 }
+
 //
 // Generate methods description for MultiQC
 //

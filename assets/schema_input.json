@@ -41,7 +41,12 @@
                 "exists": true,
                 "default": null,
                 "pattern": "^([\\S\\s]*/)?[^\\s/]+\\.(fa(sta)?|fna)\\.gz$",
-                "errorMessage": "Fasta file used as reference genome"
+                "errorMessage": "Fasta file used as reference genome. Must be supplied with ploidy."
+            },
+            "ploidy": {
+                "type": "integer",
+                "default": null,
+                "errorMessage": "Ploidy of organism. Must be supplied with reference."
             },
             "sra": {
                 "type": "string",
