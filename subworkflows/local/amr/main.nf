@@ -109,15 +109,18 @@ workflow AMR {
     ch_versions = ch_versions.mix(SNPEFF.out.versions.first())
 
     // Parse SnpEff results using species JSON emitted by PREP_SNPEFF
+    // Match annotated VCFs to species JSON by stable sample ID (meta.id), not full meta
     SNPEFF_PARSE(
         SNPEFF
             .out
             .vcf
-            .join( 
+            .map { meta, vcf -> [ meta.id, meta, vcf ] }
+            .join(
                 ch_snpeff_files
-                    .map { meta, fa, gff, json -> [ meta, json ] 
-                } 
+                    .map { meta, fa, gff, json -> [ meta.id, json ] },
+                by: 0
             )
+            .map { id, meta, vcf, json -> [ meta, vcf, json ] }
     )
     ch_versions = ch_versions.mix(SNPEFF_PARSE.out.versions.first())
 

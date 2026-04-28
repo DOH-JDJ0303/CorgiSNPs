@@ -165,12 +165,18 @@ workflow CORGISNPS {
                 ch_vcf
             )
             ch_versions = ch_versions.mix(AMR.out.versions)
-            
+
+            // Join summary rows with AMR outputs by stable sample ID (meta.id), not full meta
             ch_summary_pass_amr = ch_summary_pass
-                .join(AMR.out.summary, remainder: true)
-                .branch{ meta, summaryline, amr_summary -> 
-                    pass: amr_summary
-                    not_pass: !amr_summary  }
+                .map { meta, summaryline -> [meta.id, meta, summaryline] }
+                .join(
+                    AMR.out.summary.map { meta, amr_summary -> [meta.id, amr_summary] },
+                    remainder: true
+                )
+                .map { id, meta, summaryline, amr_summary -> [meta, summaryline, amr_summary] }
+                .branch{ meta, summaryline, amr_summary ->
+                    pass: summaryline && amr_summary
+                    not_pass: summaryline && !amr_summary  }
 
             ADD_AMR(
                 ch_summary_pass_amr.pass
