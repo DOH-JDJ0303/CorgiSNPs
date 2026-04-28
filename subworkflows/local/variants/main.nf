@@ -94,7 +94,7 @@ workflow VARIANTS {
             def subtypeMatch = refData.subtype.any { Utils.sanitize(it) == Utils.sanitize(meta.subtype) }
             def match        = supplied ? false : speciesMatch && subtypeMatch
             def reference    = match ? refData.reference : meta.reference 
-            def ploidy       = match ? refData.ploidy : meta.reference
+            def ploidy       = match ? refData.ploidy : meta.ploidy
             def new_meta     = meta + [reference: reference, ploidy: ploidy]
 
             return [new_meta, reads]
