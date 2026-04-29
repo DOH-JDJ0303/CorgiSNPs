@@ -187,7 +187,7 @@ def main():
                 except Exception:
                     pass
 
-        Phylo.write(tree, "tree.formated.nwk", "newick")
+        Phylo.write(tree, "tree.formatted.nwk", "newick")
 
         labels, dist = patristic_distance_matrix(tree)
         tree_samples = set(labels)
@@ -279,8 +279,8 @@ def main():
         # Attach files if present
         if _ensure_path(Path(summary_out_file), "Summary"):
             _attach_text_file(mr_json, "summary_file", Path(summary_out_file), f"{prefix}.summary.csv")
-        if _ensure_path(Path("tree.formated.nwk"), "Tree"):
-            _attach_text_file(mr_json, "tree_file", Path("tree.formated.nwk"), f"{prefix}.nwk")
+        if _ensure_path(Path("tree.formatted.nwk"), "Tree"):
+            _attach_text_file(mr_json, "tree_file", Path("tree.formatted.nwk"), f"{prefix}.nwk")
         if _ensure_path(Path("matrix.csv"), "Distance matrix"):
             _attach_text_file(mr_json, "dist_file", Path("matrix.csv"), f"{prefix}.dist.csv")
 
