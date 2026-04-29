@@ -95,15 +95,15 @@ process REPORT_SPECIES {
     label 'process_low'
         
     input:
-    tuple val(species), val(subtype), path(aln_stats), path(tree), path(dist), path(summary)
+    tuple val(meta), path(aln_stats), path(tree), path(dist), path(summary)
     path microreact_template
 
     output:
-    tuple val(species), val(subtype), path("*"), emit: results
+    tuple val(meta), path("*"), emit: results
     path "versions.yml",                         emit: versions
     
     script:
-    prefix = "${species}-${subtype}"
+    prefix = "${meta.species}-${meta.subtype}"
     tool = 'report_species.py'
     """
     ${tool} \\
