@@ -3,18 +3,18 @@ process IQTREE {
     label 'process_high'
     
     input:
-    tuple val(species), val(subtype), path(aln), path(const_sites), val(count)
+    tuple val(meta), path(aln), path(const_sites), val(count)
 
     output:
-    tuple val(species), val(subtype), path("*.nwk"), emit: tree
-    path 'versions.yml',                                          emit: versions
+    tuple val(meta), path("*.nwk"), emit: tree
+    path 'versions.yml',            emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     args         = task.ext.args ?: ''
-    prefix       = "${species}-${subtype}"
+    prefix       = "${meta.species}-${meta.subtype}"
     bootstrap    = count > 4 ? '-B 1000' : ''
     tree_ext     = count > 4 ? 'contree' : 'treefile'
     """

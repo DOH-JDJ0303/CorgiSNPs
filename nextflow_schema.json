@@ -167,10 +167,10 @@
             "description": "Quality control performed prior to variant caling",
             "default": "",
             "properties": {
-                "auto_qc": {
+                "ignore_qc": {
                     "type": "boolean",
-                    "default": true,
-                    "description": "Enable/disable automated quality control (performed prior to variant calling)"
+                    "default": false,
+                    "description": "Ignore automated quality control results. Caution: This will allow low quality samples to pass to the variant calling steps."
                 },
                 "min_depth_qc": {
                     "type": "integer",
@@ -195,11 +195,6 @@
             "fa_icon": "fas fa-dna",
             "description": "Depth, quality, and bias thresholds used for calls/consensus.",
             "properties": {
-                "ploidy": {
-                    "type": "integer",
-                    "default": 1,
-                    "description": "Expected ploidy of the organism."
-                },
                 "max_reads": {
                     "type": "integer",
                     "default": 10000000,

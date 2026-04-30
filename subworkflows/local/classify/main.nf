@@ -22,10 +22,8 @@ include { SUBTYPE      } from '../../../modules/local/subtype/main'
 workflow CLASSIFY {
 
     take:
-    // ch_reads: [ val(meta), path(reads) ]
-    ch_reads
-    // ch_meta : [ val(meta), val(species), val(subtype), path(reference) ]
-    ch_meta
+    // ch_samplesheet: [ val(meta), path(reads) ]
+    ch_samplesheet
 
     main:
 
@@ -36,7 +34,7 @@ workflow CLASSIFY {
     // MODULE: de novo assembly (produces contigs for classification)
     // -------------------------------------------------------------------------
     SHOVILL(
-        ch_reads
+        ch_samplesheet
     )
 
     // -------------------------------------------------------------------------
@@ -68,27 +66,20 @@ workflow CLASSIFY {
         .set { ch_class }
 
     // -------------------------------------------------------------------------
-    // Prefer provided species/subtype; otherwise fall back to derived values. (Shouldn't be needed but still included)
-    // Preserve original reference path.
-    // Output shape: [ meta, species, subtype, reference ]
+    // Update the species and subtype values
     // -------------------------------------------------------------------------
-    ch_meta
+    ch_samplesheet
         .join(ch_class)
-        .map { meta, species, subtype, reference, derived_species, derived_subtype ->
-            [ meta,
-              species  ? species  : derived_species,
-              subtype  ? subtype  : derived_subtype,
-              reference ]
+        .map { meta, reads, species, subtype ->
+            def new_meta = meta + [species: species ? species : 'no_species', subtype: subtype ? subtype : 'no_subtype']
+            [ new_meta, reads ]
         }
-        .set { ch_meta }
-
-    // Final catch-all
-    ch_meta.map{ meta, sp, sb, ref -> [meta, sp ? sp : 'no_species', sb ? sb : 'no_subtype', ref ] }.set{ch_meta}
+        .set { ch_samplesheet }
 
     emit:
-    meta     = ch_meta
-    denovo   = SHOVILL.out.contigs
-    species  = GAMBIT_QUERY.out.taxa
-    subtype  = SUBTYPE.out.subtype
-    versions = ch_versions
+    samplesheet = ch_samplesheet
+    denovo      = SHOVILL.out.contigs
+    species     = GAMBIT_QUERY.out.taxa
+    subtype     = SUBTYPE.out.subtype
+    versions    = ch_versions
 }

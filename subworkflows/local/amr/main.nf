@@ -15,8 +15,8 @@ include { SNPEFF_PARSE    } from '../../../modules/local/snpeff_parse/main'
 workflow AMR {
 
     take:
-    // ch_meta: [ meta, species, subtype, reference ]
-    ch_meta
+    // ch_samplesheet: [ meta, reads ]
+    ch_samplesheet
     // ch_bam : [ meta, bam, bai ]
     ch_bam
     // ch_vcf : [ meta, vcf, csi ]
@@ -30,22 +30,22 @@ workflow AMR {
     // Prepare SnpEff reference files once per species in the batch
     // ---------------------------------------------------------------------
     PREP_SNPEFF(
-        ch_meta.map { meta, sp, sb, ref -> sp }.unique(),
+        ch_samplesheet.map { meta, reads -> meta.species }.unique(),
         params.snpeff_db
     )
 
     // Tie SnpEff assets (fa/gff/json) back to each sample's meta/ref
-    ch_meta
-        .map    { meta, sp, sb, ref -> [ sp, meta, ref ] }
+    ch_samplesheet
+        .map    { meta, reads -> [ meta.species, meta ] }
         .combine(PREP_SNPEFF.out.files, by: 0)
-        .map    { sp, meta, ref, fa, gff, json -> [ meta, sp, ref, fa, gff, json ] }
+        .map    { sp, meta, fa, gff, json -> [ meta, fa, gff, json ] }
         .set    { ch_snpeff_files }
 
     // ---------------------------------------------------------------------
     // Compare sample reference vs SnpEff FASTA (checksum-based)
     // ---------------------------------------------------------------------
     COMPARE_REFS(
-        ch_snpeff_files.map { meta, sp, ref, fa, gff, json -> [ meta, ref, fa ] }
+        ch_snpeff_files.map { meta, fa, gff, json -> [ meta, meta.reference, fa ] }
     )
     ch_versions = ch_versions.mix(COMPARE_REFS.out.versions.first())
 
@@ -62,37 +62,45 @@ workflow AMR {
             same_ref:  matches
             diff_ref: !matches
         }
-        .set { ref_branches }
+        .set { ch_ref_branches }
 
     // ---------------------------------------------------------------------
     // For differing references: extract target regions and re-call variants
     // ---------------------------------------------------------------------
     EXTRACT_REGIONS(
-        ref_branches.diff_ref
+        ch_ref_branches.diff_ref
             .map  { meta, matches -> meta } // strip boolean
-            .join(ch_bam.map { meta, bam, bai -> [ meta, bam ] })
-            .join(ch_snpeff_files.map { meta, sp, ref, fa, gff, json -> [ meta, ref, fa, gff ] })
+            .join(
+                ch_bam.map { meta, bam, bai -> [ meta, bam ] }
+            )
+            .join(
+                ch_snpeff_files.map { meta, fa, gff, json -> [ meta, meta.reference, fa, gff ] }
+            )
     )
     ch_versions = ch_versions.mix(EXTRACT_REGIONS.out.versions.first())
-
+    ch_regions  = EXTRACT_REGIONS
+        .out
+        .results
+        .map{ meta, reads, ref ->
+                def new_meta = meta + [reference: ref]
+                return [new_meta, reads]
+        }
     // Call variants on extracted reads against the extracted reference
     VARIANTS(
-        EXTRACT_REGIONS.out.reads,
-        EXTRACT_REGIONS.out.ref.map { meta, ref -> [ meta, [], [], ref ] },
+        ch_regions,
         false
     )
     ch_versions = ch_versions.mix(VARIANTS.out.versions.first())
-    VARIANTS.out.vcf.set { ch_new_vcf }
+    ch_new_vcf  = VARIANTS.out.vcf
 
     // ---------------------------------------------------------------------
     // SnpEff: annotate either the original VCF (same_ref) or re-called VCF
     // ---------------------------------------------------------------------
-    ref_branches.same_ref
+    ch_for_snpeff = ch_ref_branches
+        .same_ref
         .map   { meta, matches -> meta }
         .join  (ch_vcf)
         .concat(ch_new_vcf)
-        .join  (ch_meta.map { meta, species, subtype, ref -> [ meta, species ] })
-        .set   { ch_for_snpeff }
 
     SNPEFF(
         ch_for_snpeff,
@@ -101,8 +109,18 @@ workflow AMR {
     ch_versions = ch_versions.mix(SNPEFF.out.versions.first())
 
     // Parse SnpEff results using species JSON emitted by PREP_SNPEFF
+    // Match annotated VCFs to species JSON by stable sample ID (meta.id), not full meta
     SNPEFF_PARSE(
-        SNPEFF.out.vcf.join( ch_snpeff_files.map { meta, sp, ref, fa, gff, json -> [ meta, json ] } )
+        SNPEFF
+            .out
+            .vcf
+            .map { meta, vcf -> [ meta.id, meta, vcf ] }
+            .join(
+                ch_snpeff_files
+                    .map { meta, fa, gff, json -> [ meta.id, json ] },
+                by: 0
+            )
+            .map { id, meta, vcf, json -> [ meta, vcf, json ] }
     )
     ch_versions = ch_versions.mix(SNPEFF_PARSE.out.versions.first())
 
