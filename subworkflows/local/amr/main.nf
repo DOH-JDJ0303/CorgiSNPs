@@ -1,5 +1,3 @@
-import Utils
-
 //
 // Subworkflow for AMR analysis in the mycosnp pipeline
 //
