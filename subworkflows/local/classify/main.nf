@@ -1,5 +1,3 @@
-import Utils
-
 //
 // Subworkflow with functionality specific to the DOH-JDJ0303/mycosnp pipeline
 //

@@ -1,5 +1,3 @@
-import Utils
-
 //
 // Subworkflow with functionality specific to the DOH-JDJ0303/mycosnp pipeline
 //
@@ -50,9 +48,9 @@ workflow PHYLO {
             def filtered_cache = []
             def db_path        = file(params.db)
             if (db_path.exists()){
-                sp_sb_db       = db_path.resolve(meta.species).resolve(meta.subtype)
-                sp_db_cache    = sp_sb_db.exists() ? sp_sb_db.list().collect { sp_sb_db.resolve(it) } : []
-                filtered_cache = sp_db_cache.findAll { !current.contains(it.getName()) }
+                def sp_sb_db    = db_path.resolve(meta.species).resolve(meta.subtype)
+                def sp_db_cache = sp_sb_db.exists() ? sp_sb_db.list().collect { sp_sb_db.resolve(it) } : []
+                filtered_cache  = sp_db_cache.findAll { !current.contains(it.getName()) }
             }
             
 

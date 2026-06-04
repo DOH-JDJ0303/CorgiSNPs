@@ -161,7 +161,7 @@ def create_sample_channel(row) {
         exit 1, "ERROR: Ploidy must be specified when supplying a reference in the samplesheet."
     }
     //// Build output
-    out = [ 
+    def out = [ 
         meta: sample + ['single_end': fastq_2 ? false : true, 'species': species, 'subtype': subtype, 'ploidy': ploidy, 'reference': reference, 'sra': sra ],
         reads: fastq_2 ? [ fastq_1, fastq_2 ] : [fastq_1]
     ]
