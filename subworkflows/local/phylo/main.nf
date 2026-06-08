@@ -80,7 +80,7 @@ workflow PHYLO {
                 if( (uniq_seq?.isInteger() ? uniq_seq.toInteger() : 0) > 2 ){
                     return true
                 } else {
-                    log.warn "${meta.species} ${meta.subtype} contains <2 unique sequences - no tree will be created!"
+                    log.warn "${meta.species} ${meta.subtype} contains <3 unique sequences - no tree will be created!"
                     return false
                 }
             }
