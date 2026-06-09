@@ -105,13 +105,14 @@ process REPORT_SPECIES {
     script:
     prefix = "${meta.species}-${meta.subtype}"
     tool = 'report_species.py'
+    def tree_arg = tree ? "--tree \"${tree}\"" : ''
     """
     ${tool} \\
         --prefix ${prefix} \\
         --aln_stats "${aln_stats}" \\
         --dist "${dist}" \\
         --summary ${summary} \\
-        --tree "${tree}" \\
+        ${tree_arg} \\
         --strong_link ${params.strong_link_threshold} \\
         --inter_link ${params.inter_link_threshold} \\
         --partition_distance ${params.partition_distance} \\

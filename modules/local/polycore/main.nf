@@ -14,6 +14,7 @@ process POLYCORE {
     tuple val(meta), path("dist_long.csv"), emit: dist_long
     tuple val(meta), path("dist_wide.csv"), emit: dist_wide
     tuple val(meta), path("*.html"),        emit: plot, optional: true
+    tuple val(meta), env("UNIQ_SEQ"),       emit: uniq_seq
     path "versions.yml",                    emit: versions
 
 
@@ -27,7 +28,9 @@ process POLYCORE {
         --min-cf ${params.min_core_fraction} \\
         --ploidy ${meta.ploidy} \\
         ${args}
-        
+
+    UNIQ_SEQ=\$(cat core.aln | grep -v '>' | sort | uniq | wc -l)
+    
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

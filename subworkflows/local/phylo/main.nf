@@ -68,13 +68,6 @@ workflow PHYLO {
     )
     ch_versions = ch_versions.mix(POLYCORE.out.versions.first())
 
-    // Summarize per-(species, subtype) sample counts for downstream filtering
-    POLYCORE.out.csv
-        .splitCsv(header: true)
-        .groupTuple(by: [0, 1])      // group by species, subtype
-        .map { meta, data -> [ meta, data.size() ] }
-        .set { ch_sample_counts }
-
     // -------------------------------------------------------------------------
     // IQTREE: build trees only when there are >2 samples for the clade
     // Joins: SNP alignment + constant-site file + sample count
@@ -82,8 +75,15 @@ workflow PHYLO {
     IQTREE(
         POLYCORE.out.snps
             .join(POLYCORE.out.fconst)
-            .join(ch_sample_counts)
-            .filter { meta, aln, const_sites, count -> count > 2 }
+            .join(POLYCORE.out.uniq_seq)
+            .filter { meta, aln, const_sites, uniq_seq ->
+                if( (uniq_seq?.isInteger() ? uniq_seq.toInteger() : 0) > 2 ){
+                    return true
+                } else {
+                    log.warn "${meta.species} ${meta.subtype} contains <3 unique sequences - no tree will be created!"
+                    return false
+                }
+            }
     )
     ch_versions = ch_versions.mix(IQTREE.out.versions.first())
 
