@@ -78,7 +78,7 @@ def main():
     else:
         final = summaryline_data | amr_parsed
 
-    with open(f"{args.sample}-summary.csv", "w", newline="") as f:
+    with open(f"{args.sample}_summary.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(final.keys()))
         writer.writeheader()
         writer.writerow(final)

@@ -47,7 +47,7 @@ process COMPARE_REFS {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         sha256sum: "\$(sha256sum --version | sed -n '1p' | cut -f 4 -d ' ')"
-        gzip: "\$(gzip --version | sed -n '1p')"
+        gzip: "\$(gzip --version | sed -n '1p' | cut -f 2 -d ' ')"
     END_VERSIONS
     """
 }

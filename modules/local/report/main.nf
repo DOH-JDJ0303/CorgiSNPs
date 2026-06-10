@@ -8,7 +8,7 @@ process SUMMARYLINE {
     path(ncbi_stats)
 
     output:
-    tuple val(meta), path("*-summary.csv"), emit: summary
+    tuple val(meta), path("*_summary.csv"), emit: summary
     path "versions.yml",                    emit: versions
 
     script:
@@ -45,7 +45,7 @@ process ADD_AMR {
     tuple val(meta), path(summaryline), path(amr)
 
     output:
-    tuple val(meta), path("*-summary.csv", includeInputs: true), emit: summary
+    tuple val(meta), path("*_summary.csv", includeInputs: true), emit: summary
     path "versions.yml",                    emit: versions
 
     script:
@@ -95,12 +95,12 @@ process REPORT_SPECIES {
     label 'process_low'
         
     input:
-    tuple val(meta), path(aln_stats), path(tree), path(dist), path(summary)
+    tuple val(meta), path(aln_stats, stageAs: "input/*"), path(tree, stageAs: "input/*"), path(dist, stageAs: "input/*"), path(summary, stageAs: "input/*")
     path microreact_template
 
     output:
     tuple val(meta), path("*"), emit: results
-    path "versions.yml",                         emit: versions
+    path "versions.yml",        emit: versions
     
     script:
     prefix = "${meta.species}-${meta.subtype}"

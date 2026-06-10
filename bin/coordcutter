@@ -274,6 +274,7 @@ def extract_reads(bam: str, bed: str, outdir: str, threads: int) -> Tuple[str, s
 # CLI
 # ---------------------------
 def main() -> None:
+    VERSION = "1.1"
     ap = argparse.ArgumentParser(
         description="Extract target gene regions, align to reference, and pull reads from BAM."
     )
@@ -287,6 +288,8 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=1, help="Threads for tools")
     ap.add_argument("--log-level", default="INFO",
                     choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Log level")
+    ap.add_argument("--version", action="version",
+                        version=VERSION)
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
