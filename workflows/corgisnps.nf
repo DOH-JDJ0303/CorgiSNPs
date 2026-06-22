@@ -208,8 +208,9 @@ workflow CORGISNPS {
     if(params.phylo){
         REPORT_SPECIES (
             ch_aln_stats
-                .join(ch_tree, by: 0)
                 .join(ch_dist, by: 0)
+                .join(ch_tree, by: 0, remainder: true)
+                .map { meta, aln_stats, dist, tree -> [meta, aln_stats, tree ?: [], dist] }
                 .combine(REPORT_ALL.out.summary),
             file(params.microreact_template)
         )

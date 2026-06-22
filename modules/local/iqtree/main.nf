@@ -15,8 +15,9 @@ process IQTREE {
     script:
     args         = task.ext.args ?: ''
     prefix       = "${meta.species}-${meta.subtype}"
-    bootstrap    = count > 4 ? '-B 1000' : ''
-    tree_ext     = count > 4 ? 'contree' : 'treefile'
+    uniq_seq = (count?.isInteger() ? count.toInteger() : 0)
+    bootstrap    = uniq_seq > 4 ? '-B 1000' : ''
+    tree_ext     = uniq_seq > 4 ? 'contree' : 'treefile'
     """
     # run IQTREE2
     iqtree2 \\
