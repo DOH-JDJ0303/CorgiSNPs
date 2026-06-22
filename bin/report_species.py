@@ -38,7 +38,7 @@ def load_csv(path: str, sep: str = ',') -> List[Dict[str, str]]:
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f, delimiter=sep))
 
-def load_dist(path: str):
+def load_dist(path: str, out_matrix: str = 'matrix.csv'):
     rowids, colids, mr_out = [], None, []
     M = None
     with open(path, 'r', encoding='utf-8') as f:
@@ -60,7 +60,7 @@ def load_dist(path: str):
             mr_out.append(row)
     if rowids != colids:
         raise ValueError(f"Row/column IDs mismatch in {path}")
-    with open('matrix.csv', 'w', encoding='utf-8') as f:
+    with open(out_matrix, 'w', encoding='utf-8') as f:
         f.write('\n'.join([','.join(r) for r in mr_out]))
     return colids, M
 
@@ -113,6 +113,8 @@ def extend_dict(main: Dict[str, Dict[str, Any]], new: Dict[str, Dict[str, Any]])
 # ----------------------------
 
 def main():
+    VERSION = "1.1"
+
     parser = argparse.ArgumentParser(description="Summarize outputs from various workflows")
     parser.add_argument("--prefix", required=True, help="Prefix to use for file naming.")
     parser.add_argument("--aln_stats", required=True, help="Core alignment stats from PolyCore.")
@@ -126,6 +128,8 @@ def main():
     parser.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                         default='INFO')
     parser.add_argument("--log-file")
+    parser.add_argument("--version", action="version",
+                        version=VERSION)
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -139,8 +143,15 @@ def main():
     data: Dict[str, Dict[str, Any]] = {}
     stats_dict: Dict[str, Dict[str, Any]] = {}
     tree_samples: set = set()
-    summary_out_file = 'summary.subset.csv'
-    
+
+    # Output file names derived from the prefix. These are the same names the
+    # files are given inside the Microreact bundle, so the on-disk outputs now
+    # match the Microreact attachment names.
+    prefix = args.prefix or "project"
+    summary_out_file = f"{prefix}_summary.csv"
+    matrix_out_file = f"{prefix}_dist.csv"
+    tree_out_file = f"{prefix}.nwk"
+
     # ----------------------------
     # Alignment stats
     # ----------------------------
@@ -155,7 +166,7 @@ def main():
     # ----------------------------
     snp_dists = None
     if args.dist:
-        snp_labels, snp_dists = load_dist(args.dist)
+        snp_labels, snp_dists = load_dist(args.dist, matrix_out_file)
         extend_dict(data, find_links(snp_dists, snp_labels, args.strong_link, args.inter_link))
         # Preserve prior behavior: also write raw matrix as out.csv
         np.savetxt("out.csv", snp_dists, delimiter=",", fmt="%.6g")
@@ -187,7 +198,7 @@ def main():
                 except Exception:
                     pass
 
-        Phylo.write(tree, "tree.formatted.nwk", "newick")
+        Phylo.write(tree, tree_out_file, "newick")
 
         labels, dist = patristic_distance_matrix(tree)
         tree_samples = set(labels)
@@ -274,15 +285,14 @@ def main():
         mr_json.setdefault('tables', {})
         mr_json['tables'].setdefault('table-1', {})  # ensure table exists
 
-        prefix = args.prefix or "project"
-
-        # Attach files if present
+        # Attach files if present. The on-disk file names already use the
+        # prefix, so they are reused directly as the Microreact attachment names.
         if _ensure_path(Path(summary_out_file), "Summary"):
-            _attach_text_file(mr_json, "summary_file", Path(summary_out_file), f"{prefix}.summary.csv")
-        if _ensure_path(Path("tree.formatted.nwk"), "Tree"):
-            _attach_text_file(mr_json, "tree_file", Path("tree.formatted.nwk"), f"{prefix}.nwk")
-        if _ensure_path(Path("matrix.csv"), "Distance matrix"):
-            _attach_text_file(mr_json, "dist_file", Path("matrix.csv"), f"{prefix}.dist.csv")
+            _attach_text_file(mr_json, "summary_file", Path(summary_out_file), summary_out_file)
+        if _ensure_path(Path(tree_out_file), "Tree"):
+            _attach_text_file(mr_json, "tree_file", Path(tree_out_file), tree_out_file)
+        if _ensure_path(Path(matrix_out_file), "Distance matrix"):
+            _attach_text_file(mr_json, "dist_file", Path(matrix_out_file), matrix_out_file)
 
         # Meta
         mr_json['meta']['name'] = prefix

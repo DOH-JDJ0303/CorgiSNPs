@@ -13,7 +13,6 @@ import argparse
 import logging
 from typing import List, Dict, Any, Optional
 
-
 # ----------------------------
 # Helper Functions
 # ----------------------------
@@ -361,7 +360,7 @@ def main():
                         help="Optional log file path")
     
     parser.add_argument("--version", action="version",
-                        version=f"%(prog)s {VERSION}")
+                        version=VERSION)
 
     args = parser.parse_args()
 
@@ -488,7 +487,7 @@ def main():
     filtered_data = {col: data.get(col, '') for col in output_columns}
 
     # Write output CSV
-    output_file = f"{args.sample}-summary.csv"
+    output_file = f"{args.sample}_summary.csv"
     with open(output_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=output_columns)
         writer.writeheader()

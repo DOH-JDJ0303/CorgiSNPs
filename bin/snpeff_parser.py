@@ -416,7 +416,7 @@ def write_output(data: List[Dict[str, Any]], output_file: str, output_format: st
 
 
 def main():
-    """Main function"""
+    VERSION = "1.1"
     parser = argparse.ArgumentParser(
         description="Parse SnpEff-annotated VCF files and extract variant annotations"
     )
@@ -429,6 +429,8 @@ def main():
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
                        default='INFO', help='Logging level (default: INFO)')
     parser.add_argument('--log-file', help='Optional log file path')
+    parser.add_argument("--version", action="version",
+                        version=VERSION)
     
     args = parser.parse_args()
     
