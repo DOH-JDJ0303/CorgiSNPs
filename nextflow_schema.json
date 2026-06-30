@@ -237,7 +237,7 @@
                 },
                 "max_read_pos_bias": {
                     "type": "integer",
-                    "default": 20,
+                    "default": 30,
                     "description": "Maximum read-position-bias score (per allele)."
                 }
             }
