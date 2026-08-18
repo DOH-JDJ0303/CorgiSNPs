@@ -453,9 +453,13 @@ def main():
         elif isinstance(value, float) and not key.endswith('_depth'):
             data[key] = round(value, 2)
 
+    # Samples processed here always come from the input samplesheet
+    data['status'] = 'new'
+
     # Define output column order
     output_columns = [
         'sample',
+        'status',
         'qc_status',
         'qc_reason',
         'species',

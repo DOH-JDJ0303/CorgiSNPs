@@ -21,9 +21,17 @@ process POLYCORE {
     script:
     def args = task.ext.args ?: ''
     prefix = "${meta.species}-${meta.subtype}"
+    def origName = ref.getName()
+    def stem = origName.replaceAll(/\.gz$/, '').replaceAll(/\.(fna|fa|fasta|fas)$/, '')
+    def suffix = origName.substring(stem.length())
+    def prefixedName = stem.startsWith('Reference_') ? origName : "Reference_${stem}${suffix}"
     """
+    if [ "${origName}" != "${prefixedName}" ]; then
+        ln -s ${ref} ${prefixedName}
+    fi
+
     polycore \\
-        ${ref} ${assemblies} \\
+        ${prefixedName} ${assemblies} \\
         --min-gf ${params.min_genome_fraction} \\
         --min-cf ${params.min_core_fraction} \\
         --ploidy ${meta.ploidy} \\
