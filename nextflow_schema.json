@@ -174,7 +174,7 @@
                 },
                 "min_depth_qc": {
                     "type": "integer",
-                    "default": 20,
+                    "default": 30,
                     "description": "Min. mean read depth across full genome"
                 },
                 "min_q30_rate_qc": {

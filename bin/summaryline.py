@@ -344,7 +344,7 @@ def main():
     # QC parameters
     parser.add_argument("--min_ncbi_stats_n", type=int, default=3,
                         help="Minimum samples in NCBI stats for z-score calculation")
-    parser.add_argument("--min_depth", type=int, default=20,
+    parser.add_argument("--min_depth", type=int, default=30,
                         help="Minimum read depth for QC pass")
     parser.add_argument("--min_qual", type=float, default=0.8,
                         help="Minimum Q30 rate for QC pass")
