@@ -330,7 +330,8 @@ def main():
             if header:
                 mr_json['tables']['table-1']['columns'] = [{"field": h, "fixed": False} for h in header]
 
-        out_path = f"{prefix}.microreact"
+        epoch = int(datetime.now(timezone.utc).timestamp())
+        out_path = f"{epoch}-{prefix}.microreact"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(mr_json, f, indent=2, ensure_ascii=False)
         logging.info("Wrote %s", out_path)
