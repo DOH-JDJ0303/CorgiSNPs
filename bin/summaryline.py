@@ -316,7 +316,7 @@ def perform_auto_qc(
 
 def main():
     """Main workflow summarization function."""
-    VERSION = "1.1"
+    VERSION = "1.2"
 
     parser = argparse.ArgumentParser(
         description="Summarize outputs from bioinformatics workflows",

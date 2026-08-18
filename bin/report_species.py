@@ -124,7 +124,7 @@ def reference_row(stats: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
 # ----------------------------
 
 def main():
-    VERSION = "1.1"
+    VERSION = "1.2"
 
     parser = argparse.ArgumentParser(description="Summarize outputs from various workflows")
     parser.add_argument("--prefix", required=True, help="Prefix to use for file naming.")
