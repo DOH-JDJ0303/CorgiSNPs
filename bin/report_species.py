@@ -133,6 +133,7 @@ def main():
     parser.add_argument("--tree")
     parser.add_argument("--dist")
     parser.add_argument("--microreact")
+    parser.add_argument("--epoch", type=int, help="Unix epoch for Microreact filename prefix (shared across a run).")
     parser.add_argument("--partition_distance", default=100, type=float)
     parser.add_argument("--strong_link", default=5, type=float)
     parser.add_argument("--inter_link", default=10, type=float)
@@ -330,7 +331,7 @@ def main():
             if header:
                 mr_json['tables']['table-1']['columns'] = [{"field": h, "fixed": False} for h in header]
 
-        epoch = int(datetime.now(timezone.utc).timestamp())
+        epoch = args.epoch if args.epoch is not None else int(datetime.now(timezone.utc).timestamp())
         out_path = f"{epoch}-{prefix}.microreact"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(mr_json, f, indent=2, ensure_ascii=False)
