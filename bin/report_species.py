@@ -108,12 +108,23 @@ def extend_dict(main: Dict[str, Dict[str, Any]], new: Dict[str, Dict[str, Any]])
     for k, v in new.items():
         main[k] = main.get(k, {}) | v
 
+def is_reference_sample(sample_id: str) -> bool:
+    return bool(sample_id) and (sample_id == 'Reference' or sample_id.startswith('Reference_'))
+
+def reference_row(stats: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    if 'Reference' in stats:
+        return stats['Reference']
+    for key, row in stats.items():
+        if key.startswith('Reference_'):
+            return row
+    return {}
+
 # ----------------------------
 # Main
 # ----------------------------
 
 def main():
-    VERSION = "1.1"
+    VERSION = "1.2"
 
     parser = argparse.ArgumentParser(description="Summarize outputs from various workflows")
     parser.add_argument("--prefix", required=True, help="Prefix to use for file naming.")
@@ -122,6 +133,7 @@ def main():
     parser.add_argument("--tree")
     parser.add_argument("--dist")
     parser.add_argument("--microreact")
+    parser.add_argument("--epoch", type=int, help="Unix epoch for Microreact filename prefix (shared across a run).")
     parser.add_argument("--partition_distance", default=100, type=float)
     parser.add_argument("--strong_link", default=5, type=float)
     parser.add_argument("--inter_link", default=10, type=float)
@@ -182,7 +194,7 @@ def main():
         # Attempt to scale by reference length if present
         scale = 1.0
         try:
-            vb = stats_dict.get('Reference', {}).get('length')
+            vb = reference_row(stats_dict).get('length')
             if vb:
                 scale = float(vb)
             else:
@@ -211,10 +223,12 @@ def main():
     # Summary, filtered by alignment stats
     # ----------------------------
     original_fieldnames: List[str] = []
+    samplesheet_ids: set = set()
     sep = '\t' if args.summary.lower().endswith('.tsv') else ','
     summary_rows = load_csv(args.summary, sep)
     if summary_rows:
         original_fieldnames = list(summary_rows[0].keys())
+        samplesheet_ids = {r.get('sample', '') for r in summary_rows}
 
         filtered_rows = [r for r in summary_rows if r.get('sample', '') in stats_dict]
         logging.info("Filtered summary by alignment stats: %d -> %d", len(summary_rows), len(filtered_rows))
@@ -238,12 +252,20 @@ def main():
             if include_only and (sample_id not in include_only):
                 continue
             rec = {'sample': sample_id}
+            if is_reference_sample(sample_id):
+                rec['status'] = ''
+            elif sample_id in samplesheet_ids:
+                rec['status'] = 'new'
+            else:
+                rec['status'] = 'old'
             for k, v in sample_data.items():
+                if k in ('sample', 'status'):
+                    continue
                 if v != sample_id:  # avoid duplicating id if present as a value
                     rec[k] = ';'.join(map(str, v)) if isinstance(v, list) else v
 
                     # Track columns that are NEW (not from the original summary header)
-                    if k != 'sample' and (k not in original_fieldnames) and (k not in created_seen):
+                    if (k not in original_fieldnames) and (k not in created_seen):
                         created_cols_order.append(k)
                         created_seen.add(k)
 
@@ -255,15 +277,15 @@ def main():
         for rec in summary_records:
             all_keys.update(rec.keys())
 
-        # 1) sample
-        fieldnames: List[str] = ['sample']
+        # 1) sample, then status
+        fieldnames: List[str] = ['sample', 'status']
 
         # 2) newly created columns (in first-seen order)
         #    Keep only those that actually appear in the data
-        fieldnames.extend([c for c in created_cols_order if c in all_keys])
+        fieldnames.extend([c for c in created_cols_order if c in all_keys and c not in ('sample', 'status')])
 
         # 3) remaining columns from the original summary, in their original order
-        fieldnames.extend([fld for fld in original_fieldnames if fld != 'sample' and fld in all_keys])
+        fieldnames.extend([fld for fld in original_fieldnames if fld not in ('sample', 'status') and fld in all_keys])
 
         with open(summary_out_file, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -309,7 +331,8 @@ def main():
             if header:
                 mr_json['tables']['table-1']['columns'] = [{"field": h, "fixed": False} for h in header]
 
-        out_path = f"{prefix}.microreact"
+        epoch = args.epoch if args.epoch is not None else int(datetime.now(timezone.utc).timestamp())
+        out_path = f"{epoch}-{prefix}.microreact"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(mr_json, f, indent=2, ensure_ascii=False)
         logging.info("Wrote %s", out_path)

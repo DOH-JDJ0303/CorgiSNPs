@@ -126,7 +126,7 @@ def write_csv(path: str, row: dict) -> None:
 # Main
 # ----------------------------
 def main():
-    version = "v2.1.0"
+    version = "v2.2.0"
     
     p = argparse.ArgumentParser(description='Subtyper for the pre-MycoSNP workflow')
     p.add_argument('--sample', required=True, help='Sample name')
@@ -137,8 +137,6 @@ def main():
 
     p.add_argument('--db', required=True, help='Path to the subtype database')
     p.add_argument('--seq', required=True, help='Path to the assembly or reads (FASTA/FASTQ)')
-    p.add_argument('--distance_threshold', type=float, default=99.7,
-                   help='Percent average nucleotide identity (ANI) threshold for a call')
     p.add_argument('--out', help='Output CSV path (default: <sample>.subtype.csv)')
     p.add_argument("--version", action="version", version=version)
     p.add_argument("--log-level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -167,24 +165,43 @@ def main():
             'db': db, 'signature_file': '',
             'ksize': '', 'scaled': '', 'n_db_signatures': 0,
             'subtype': 'undefined', 'closest_subtype': '', 'closest_ani': '',
-            'threshold': args.distance_threshold, 'passed_threshold': False
+            'threshold': '', 'passed_threshold': False
         })
         logging.info(f"Wrote: {out_csv}")
         return
 
     taxon_clean = sanitize_str(taxon_val)
 
-    # manifest -> signature filepath
+    # manifest -> signature filepath and distance threshold
     manifest_path = os.path.join(db, "manifest.csv")
     if not os.path.isfile(manifest_path):
         raise ValueError(f"{manifest_path} does not exist")
 
     signature_rel = None
+    distance_threshold = None
     with open(manifest_path, 'r', newline='', encoding='utf-8') as mf:
         reader = csv.DictReader(mf)
+        if 'distance_threshold' not in (reader.fieldnames or []):
+            raise ValueError(f"{manifest_path} is missing required column: distance_threshold")
         for row in reader:
             if sanitize_str(row.get('taxon', '')) == taxon_clean:
                 signature_rel = row.get('signature_filepath')
+                raw_threshold = (row.get('distance_threshold') or '').strip()
+                if not raw_threshold:
+                    raise ValueError(
+                        f"Manifest row for taxon '{taxon_val}' is missing a distance_threshold"
+                    )
+                try:
+                    distance_threshold = float(raw_threshold)
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid distance_threshold '{raw_threshold}' for taxon '{taxon_val}'"
+                    ) from e
+                if not (0.0 <= distance_threshold <= 100.0):
+                    raise ValueError(
+                        f"distance_threshold for taxon '{taxon_val}' must be between 0 and 100, "
+                        f"got {distance_threshold}"
+                    )
                 break
 
     if not signature_rel:
@@ -193,7 +210,7 @@ def main():
             'sample': sample, 'taxon': taxon_val, 'db': db, 'signature_file': '',
             'ksize': '', 'scaled': '', 'n_db_signatures': 0,
             'subtype': 'undefined', 'closest_subtype': '', 'closest_ani': '',
-            'threshold': args.distance_threshold, 'passed_threshold': False
+            'threshold': '', 'passed_threshold': False
         })
         logging.info(f"Wrote: {out_csv}")
         return
@@ -225,7 +242,7 @@ def main():
             top_matches.add(sig.name or "Undefined")
 
     closest_subtype = " / ".join(sorted(top_matches)) if top_matches else ""
-    passed = (top_ani >= float(args.distance_threshold)) and bool(top_matches)
+    passed = (top_ani >= float(distance_threshold)) and bool(top_matches)
 
     if not top_matches or not passed:
         subtype = 'undefined'
@@ -243,7 +260,7 @@ def main():
         'subtype': subtype,
         'closest_subtype': closest_subtype,
         'closest_ani': round(top_ani, 2) if top_matches else '',
-        'threshold': args.distance_threshold,
+        'threshold': distance_threshold,
         'passed_threshold': passed
     }
     write_csv(out_csv, row)

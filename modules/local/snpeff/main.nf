@@ -2,7 +2,7 @@ process SNPEFF {
     tag "$meta.id"
     label 'process_medium'
 
-    container 'docker.io/staphb/snpeff:5.2f'
+    container 'staphb/snpeff:5.2f'
 
     input:
     tuple val(meta), path(vcf), path(tbi)
