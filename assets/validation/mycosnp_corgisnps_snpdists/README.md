@@ -8,12 +8,12 @@ Requires Python 3.8+ and `vcfTools.py` (same directory) for the VCF converter. U
 
 ### `run_mycosnp_vs_corgisnps.py`
 
-Runs the VCF→wide CSV conversion, then the comparison. Accepts gzipped or plain reference FASTA and MycoSNP VCF. Sets `--max_amb_samples` to 10% of the VCF sample count (floored, minimum 1).
+Runs the VCF→wide CSV conversion, then the comparison. Accepts gzipped or plain reference FASTA and MycoSNP finalfiltered.vcf. Sets `--max_amb_samples` to 10% of the VCF sample count (floored, minimum 1).
 
 ```bash
 python run_mycosnp_vs_corgisnps.py \
   --reference ref.fasta.gz \
-  --vcf mycosnp.vcf.gz \
+  --vcf mycosnp-finalfiltered.vcf.gz \
   --corgisnps full.csv
 ```
 
@@ -22,7 +22,7 @@ Defaults write `mycosnp_full.csv`, `snp_comparison_summary.csv`, and `snp_compar
 ```bash
 python run_mycosnp_vs_corgisnps.py \
   --reference ref.fasta \
-  --vcf mycosnp.vcf \
+  --vcf mycosnp-finalfiltered.vcf \
   --corgisnps full.csv \
   --mycosnp-csv mycosnp_full.csv \
   --output snp_comparison_summary.csv \
@@ -34,12 +34,11 @@ python run_mycosnp_vs_corgisnps.py \
 
 ### `vcfSnpsToFasta_genomewide_fullcsv.py`
 
-Convert a filtered VCF to a genome-wide wide CSV (`CHROM,POS,FILTER,REF,<samples>...`). Writes one row per reference position to **stdout**. Low-depth, filtered, or ambiguous calls become `N`. Plain (uncompressed) inputs only.
+Convert MycoSNP finalfiltered.vcf to a genome-wide wide CSV (`CHROM,POS,FILTER,REF,<samples>...`). Writes one row per reference position to **stdout**. Low-depth, filtered, or ambiguous calls become `N`. Plain (uncompressed) inputs only.
 
 ```bash
-python vcfSnpsToFasta_genomewide_fullcsv.py input.vcf \
+python vcfSnpsToFasta_genomewide_fullcsv.py mycosnp-finalfiltered.vcf \
   --reference ref.fasta \
-  --min_depth 10 \
   --max_amb_samples 3 \
   --reference-column-name REF \
   > mycosnp_full.csv
