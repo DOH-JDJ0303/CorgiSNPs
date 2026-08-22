@@ -34,13 +34,13 @@ python run_mycosnp_vs_corgisnps.py \
 
 ### `vcfSnpsToFasta_genomewide_fullcsv.py`
 
-Convert MycoSNP finalfiltered.vcf to a genome-wide wide CSV (`CHROM,POS,FILTER,REF,<samples>...`). Writes one row per reference position to **stdout**. Low-depth, filtered, or ambiguous calls become `N`. Plain (uncompressed) inputs only.
+Convert MycoSNP finalfiltered.vcf to a genome-wide wide CSV (`CHROM,POS,FILTER,REF,<samples>...`). Writes one row per reference position to **stdout**. Low-depth, filtered, or ambiguous calls become `N`. Plain (uncompressed) inputs only. Pass the name of the fourth column of CorgiSNPs full.csv as `--reference-column-name`, so they match for the next step.
 
 ```bash
 python vcfSnpsToFasta_genomewide_fullcsv.py mycosnp-finalfiltered.vcf \
   --reference ref.fasta \
   --max_amb_samples 3 \
-  --reference-column-name REF \
+  --reference-column-name REF_NAME_FROM_CORGISNPS_FULL_CSV \
   > mycosnp_full.csv
 ```
 

@@ -6,12 +6,14 @@ Python: 3.8+
 
 Accepts gzipped or plain reference FASTA and MycoSNP VCF. Sets
 --max_amb_samples on the converter to floor(10% of VCF sample count),
-minimum 1.
+minimum 1. Reads the CorgiSNPs reference-column name from full.csv and
+passes it to the converter as --reference-column-name.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import math
 import os
@@ -22,6 +24,7 @@ import tempfile
 from typing import Optional, TextIO
 
 
+METADATA_COLUMNS = {"CHROM", "POS", "FILTER"}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VCF_TO_CSV = os.path.join(SCRIPT_DIR, "vcfSnpsToFasta_genomewide_fullcsv.py")
 COMPARE = os.path.join(SCRIPT_DIR, "compare_mycosnp_corgisnps.py")
@@ -122,6 +125,29 @@ def max_amb_samples_from_count(sample_count: int) -> int:
     return max(1, math.floor(sample_count * 0.1))
 
 
+def read_corgisnps_ref_column_name(path: str) -> str:
+    """Return the first non-metadata column after CHROM/POS/FILTER."""
+    with open(path, "r", newline="") as handle:
+        reader = csv.reader(handle)
+        try:
+            header = next(reader)
+        except StopIteration:
+            raise SystemExit("CorgiSNPs file is empty: {}".format(path))
+
+    missing = [column for column in ("CHROM", "POS", "FILTER") if column not in header]
+    if missing:
+        raise SystemExit(
+            "{} is missing required column(s): {}".format(path, ", ".join(missing))
+        )
+
+    non_metadata = [column for column in header if column not in METADATA_COLUMNS]
+    if not non_metadata:
+        raise SystemExit(
+            "{} has no reference/sample columns after CHROM, POS, FILTER".format(path)
+        )
+    return non_metadata[0]
+
+
 def run_checked(cmd: list, stdout: Optional[TextIO] = None) -> None:
     sys.stderr.write("Running: {}\n".format(" ".join(cmd)))
     subprocess.run(cmd, check=True, stdout=stdout)
@@ -140,10 +166,14 @@ def main() -> None:
 
     sample_count = count_vcf_samples(args.vcf)
     max_amb = max_amb_samples_from_count(sample_count)
+    ref_column_name = read_corgisnps_ref_column_name(args.corgisnps)
     sys.stderr.write(
         "VCF samples: {}; max_amb_samples: {} (10% floored, min 1)\n".format(
             sample_count, max_amb
         )
+    )
+    sys.stderr.write(
+        "CorgiSNPs reference column: {}\n".format(ref_column_name)
     )
 
     with tempfile.TemporaryDirectory(prefix="mycosnp_corgi_") as tmpdir:
@@ -160,6 +190,8 @@ def main() -> None:
             str(max_amb),
             "--min_depth",
             str(args.min_depth),
+            "--reference-column-name",
+            ref_column_name,
         ]
         mycosnp_csv_dir = os.path.dirname(os.path.abspath(args.mycosnp_csv))
         if mycosnp_csv_dir:
